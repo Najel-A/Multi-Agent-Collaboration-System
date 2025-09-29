@@ -1,0 +1,101 @@
+version: "3.9"
+
+name: elk
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${STACK_VERSION}
+    container_name: es01
+    environment:
+      - node.name=es01
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
+      - xpack.monitoring.collection.enabled=true
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - ES_JAVA_OPTS=${ES_JAVA_OPTS}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health | grep -qE '\"status\":\"(yellow|green)\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 50
+      start_period: 40s
+
+    networks: [elk]
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${STACK_VERSION}
+    container_name: kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ELASTICSEARCH_HOSTS=["http://elasticsearch:9200"]
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD}
+      - SERVER_PUBLICBASEURL=http://localhost:5601
+    ports:
+      - "5601:5601"
+    healthcheck:
+      test: ["CMD", "curl", "-sSf", "http://localhost:5601/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks: [elk]
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:${STACK_VERSION}
+    container_name: logstash
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - LS_JAVA_OPTS=${LS_JAVA_OPTS}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD} 
+    volumes:
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+    ports:
+      - "5044:5044"   # beats input
+      - "9600:9600"   # monitoring API
+    healthcheck:
+      test: ["CMD", "curl", "-sSf", "http://localhost:9600/_node/pipelines"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks: [elk]
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${STACK_VERSION}
+    container_name: filebeat
+    user: root              # needed to access Docker socket/paths if you enable them
+    depends_on:
+      logstash:
+        condition: service_started
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./sample-logs:/sample-logs:ro
+      # Optional: enable these two to harvest Docker container logs
+      # - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: ["--strict.perms=false"]
+    networks: [elk]
+
+volumes:
+  es-data:
+
+networks:
+  elk:
+    driver: bridge
+
+# curl -u elastic:changeme_Elastic_123! -X POST "http://localhost:9200/_security/user/kibana_system/_password" -H "Content-Type: application/json" -d "{\"password\":\"changeme_Kibana_123!\"}"
+# username: elastic
+# password: changeme_Elastic_123!
