@@ -1,30 +1,35 @@
+# filebeat.yml
 filebeat.inputs:
-  - type: log
-    id: sample-logs
+  - type: filestream
+    id: spark-logs
     enabled: true
     paths:
-      - /sample-logs/*.log
+      - /sample-logs/application_*.log # your files from the screenshot
     fields:
-      source_type: "sample"
+      service.name: spark
+      event.dataset: spark
+      source_type: spark_loghub
     fields_under_root: true
+
+    # Glue Java stack traces: only lines that START with a timestamp open a new event
+    multiline:
+      pattern: '^\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\s' # e.g., 24/09/28 12:34:56
+      negate: true
+      match: after
+      max_lines: 500
+      timeout: 5s
 
 processors:
   - add_host_metadata: ~
   - add_cloud_metadata: ~
   - add_docker_metadata: ~
-  - decode_json_fields:
-      fields: ["message"]
-      target: "json"
-      overwrite_keys: true
-      add_error_key: true
-      when:
-        contains:
-          message: "{"
-# ^ decode_json_fields is harmless for plain text; useful if your lines are JSON.
 
+# keep Logstash
 output.logstash:
   hosts: ["logstash:5044"]
 
+# Let Logstash/ES handle templates & ILM (we’ll configure in LS/ES)
 setup.template.enabled: false
 setup.ilm.enabled: false
-logging.to_files: false
+
+logging.to_files: true
