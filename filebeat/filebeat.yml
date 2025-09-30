@@ -1,19 +1,22 @@
-# filebeat.yml
 filebeat.inputs:
   - type: filestream
     id: spark-logs
     enabled: true
     paths:
-      - /sample-logs/application_*.log # your files from the screenshot
+      - /spark-logs/application_*/*.{log,LOG,out,err}
+      - /spark-logs/application_*/*/*.{log,LOG,out,err}
+      - /spark-logs/application_*/* # catch files without extensions
+      - /spark-logs/application_*/*/* # catch deeper files without extensions
+    exclude_files: ['\.gz$', '\.zip$']
     fields:
       service.name: spark
       event.dataset: spark
       source_type: spark_loghub
     fields_under_root: true
 
-    # Glue Java stack traces: only lines that START with a timestamp open a new event
+    # Handle BOTH common Spark timestamp styles
     multiline:
-      pattern: '^\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}\s' # e.g., 24/09/28 12:34:56
+      pattern: '^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}|\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})'
       negate: true
       match: after
       max_lines: 500
@@ -24,12 +27,9 @@ processors:
   - add_cloud_metadata: ~
   - add_docker_metadata: ~
 
-# keep Logstash
 output.logstash:
   hosts: ["logstash:5044"]
 
-# Let Logstash/ES handle templates & ILM (we’ll configure in LS/ES)
 setup.template.enabled: false
 setup.ilm.enabled: false
-
 logging.to_files: true

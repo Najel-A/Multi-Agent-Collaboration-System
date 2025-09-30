@@ -1,5 +1,3 @@
-version: "3.9"
-
 name: elk
 services:
   elasticsearch:
@@ -82,15 +80,17 @@ services:
         condition: service_started
     volumes:
       - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - ./sample-logs:/sample-logs:ro
-      # Optional: enable these two to harvest Docker container logs
-      # - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      # - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./Spark_DataSet_298:/spark-logs:ro
+      - filebeat-data:/usr/share/filebeat/data
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     command: ["--strict.perms=false"]
     networks: [elk]
 
 volumes:
   es-data:
+  filebeat-data:
+    driver: local
 
 networks:
   elk:
