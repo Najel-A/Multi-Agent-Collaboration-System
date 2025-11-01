@@ -4,4 +4,11 @@ metadata:
   name: app-sync
   namespace: flux-system
 spec:
-  path: ./clusters/elk
+  interval: 1m0s
+  sourceRef:
+    kind: GitRepository
+    name: app-source
+  path: ./clusters/elk # <-- this is where your cluster stuff lives
+  prune: true
+  wait: true
+  timeout: 5m0s
