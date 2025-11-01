@@ -1,3 +1,0 @@
-http.host: "0.0.0.0"
-xpack.monitoring.enabled: false
-# (Monitoring will auto-wire via ES output; nothing else needed here.)
