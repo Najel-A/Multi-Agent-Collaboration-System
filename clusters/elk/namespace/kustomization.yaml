@@ -4,3 +4,4 @@ resources:
   - flux-namespace.yaml
   - dev-namespace.yaml
   - elastic-system.yaml
+  - test.yaml
