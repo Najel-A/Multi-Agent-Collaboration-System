@@ -2,6 +2,6 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   # Cluster resources you DO want Flux to manage for this env
-  - namespace/kustomization.yaml
+  - namespace/
 # IMPORTANT: do NOT list flux-system/ here, or Flux will self-manage
 # its own GitRepository/Kustomization and overwrite your .env changes.
