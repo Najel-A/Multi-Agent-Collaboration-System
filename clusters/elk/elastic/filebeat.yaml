@@ -6,14 +6,8 @@ metadata:
 spec:
   type: filebeat
   version: 8.14.0
-  # Remove elasticsearchRef when sending via Logstash
-  daemonSet:
-    podTemplate:
-      spec:
-        containers:
-          - name: filebeat
-            securityContext:
-              runAsUser: 0
+
+  # Send to Logstash instead of ES
   config:
     filebeat.inputs:
       - type: container
@@ -23,7 +17,8 @@ spec:
           - add_kubernetes_metadata: {}
     output.logstash:
       hosts: ["logstash-sample-beats.elastic-system.svc:5044"]
-  # Needed to read container logs on each node:
+
+  # One daemonSet block only
   daemonSet:
     podTemplate:
       spec:
@@ -32,6 +27,8 @@ spec:
         dnsPolicy: ClusterFirstWithHostNet
         containers:
           - name: filebeat
+            securityContext:
+              runAsUser: 0
             volumeMounts:
               - name: varlogcontainers
                 mountPath: /var/log/containers
