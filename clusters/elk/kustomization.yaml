@@ -3,7 +3,6 @@ kind: Kustomization
 resources:
   # Cluster resources you DO want Flux to manage for this env
   - namespace/
-  - eck/
   - elastic/
   - flux-system/
 # IMPORTANT: do NOT list flux-system/ here, or Flux will self-manage
