@@ -1,0 +1,18 @@
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: filebeat-sample
+spec:
+  type: filebeat
+  version: 8.14.0
+  elasticsearchRef:
+    name: elasticsearch-sample
+  kibanaRef:
+    name: kibana-sample
+  daemonSet:
+    podTemplate:
+      spec:
+        containers:
+          - name: filebeat
+            securityContext:
+              runAsUser: 0
