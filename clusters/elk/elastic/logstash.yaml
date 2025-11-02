@@ -1,0 +1,14 @@
+apiVersion: logstash.k8s.elastic.co/v1alpha1
+kind: Logstash
+metadata:
+  name: logstash-sample
+spec:
+  version: 8.14.0
+  count: 1
+  elasticsearchRefs:
+    - name: elasticsearch-sample
+  pipelines:
+    - pipeline.id: main
+      config.string: |
+        input { beats { port => 5044 } }
+        output { elasticsearch { hosts => ["${ELASTICSEARCH_HOSTS}"] } }
