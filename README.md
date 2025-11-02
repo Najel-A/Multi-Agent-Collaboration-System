@@ -5,7 +5,8 @@ Install kind
 Install k9s (ez for look at clusters)
 
 Flux setup
-curl -s https://fluxcd.io/install.sh | sudo bash
-flux install --namespace flux-system
+run makefile in elastic folder
+make apply
+make reconcile
 
-kubectl apply -f flux-namespace.yaml
+create .env
