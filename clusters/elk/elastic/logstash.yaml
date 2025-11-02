@@ -6,13 +6,14 @@ metadata:
 spec:
   version: 8.14.0
   count: 1
+
   elasticsearchRefs:
     - name: elasticsearch-sample
       namespace: elastic-system
+      clusterName: kind-dev # <-- REQUIRED
 
-  # NEW: load the wrapper secret into the keystore
   secureSettings:
-    - secretName: elasticsearch-sample-es-elastic-user
+    - secretName: elasticsearch-sample-es-elastic-user # key name is "elastic"
 
   pipelines:
     - pipeline.id: main
@@ -20,10 +21,10 @@ spec:
         input { beats { port => 5044 } }
         output {
           elasticsearch {
-            hosts => ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
-            user  => "elastic"
-            password => "${ELASTIC_PASSWORD}"
-            ssl   => true
+            hosts  => ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
+            user   => "elastic"
+            password => "${elastic}"          # <-- matches key in the secret
+            ssl    => true
             ssl_certificate_verification => false
           }
         }
