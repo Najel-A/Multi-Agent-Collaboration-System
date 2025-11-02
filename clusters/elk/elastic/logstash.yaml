@@ -8,8 +8,12 @@ spec:
   count: 1
   elasticsearchRefs:
     - name: elasticsearch-sample
-      clusterName: elasticsearch-sample
       namespace: elastic-system
+
+  # NEW: load the wrapper secret into the keystore
+  secureSettings:
+    - secretName: elastic-credentials
+
   pipelines:
     - pipeline.id: main
       config.string: |
@@ -17,12 +21,13 @@ spec:
         output {
           elasticsearch {
             hosts => ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
-            user => "elastic"
+            user  => "elastic"
             password => "${ELASTIC_PASSWORD}"
-            ssl => true
+            ssl   => true
             ssl_certificate_verification => false
           }
         }
+
   services:
     - name: beats
       service:
