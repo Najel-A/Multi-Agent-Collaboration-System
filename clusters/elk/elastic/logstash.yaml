@@ -12,7 +12,7 @@ spec:
 
   # NEW: load the wrapper secret into the keystore
   secureSettings:
-    - secretName: elastic-credentials
+    - secretName: elasticsearch-sample-es-elastic-user
 
   pipelines:
     - pipeline.id: main
