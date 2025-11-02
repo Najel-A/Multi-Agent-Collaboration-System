@@ -20,7 +20,7 @@ render:
 .PHONY: apply
 apply: ns render
 	kubectl apply -f flux-system/gitrepository.yaml
-	kubectl apply -f flux-system/kustomization.yaml
+	kubectl apply -f flux-system/app-sync.yaml
 
 .PHONY: reconcile
 reconcile:
