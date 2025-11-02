@@ -41,7 +41,7 @@ spec:
 
     # Route to Logstash (no ES creds needed)
     output.logstash:
-      hosts: ["logstash-sample-beats.elastic-system.svc:5044"]
+      hosts: ["logstash-sample-ls-beats.elastic-system.svc:5044"]
       # If you enabled TLS on the beats input, add ssl settings here:
       # ssl:
       #   certificate_authorities: ["/mnt/ca/ca.crt"]
