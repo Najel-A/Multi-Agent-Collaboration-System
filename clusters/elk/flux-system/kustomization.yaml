@@ -12,3 +12,8 @@ spec:
   prune: true
   wait: true
   timeout: 5m0s
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./helmrepo-elastic.yaml

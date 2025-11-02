@@ -6,8 +6,17 @@ metadata:
 spec:
   type: filebeat
   version: 8.14.0
-
-  # Send to Logstash instead of ES
+  elasticsearchRef:
+    name: elasticsearch-sample
+  kibanaRef:
+    name: kibana-sample
+  daemonSet:
+    podTemplate:
+      spec:
+        containers:
+          - name: filebeat
+            securityContext:
+              runAsUser: 0
   config:
     filebeat.inputs:
       - type: container
@@ -15,31 +24,9 @@ spec:
           - /var/log/containers/*.log
         processors:
           - add_kubernetes_metadata: {}
-    output.logstash:
-      hosts: ["logstash-sample-beats.elastic-system.svc:5044"]
-
-  # One daemonSet block only
-  daemonSet:
-    podTemplate:
-      spec:
-        serviceAccountName: filebeat
-        hostNetwork: true
-        dnsPolicy: ClusterFirstWithHostNet
-        containers:
-          - name: filebeat
-            securityContext:
-              runAsUser: 0
-            volumeMounts:
-              - name: varlogcontainers
-                mountPath: /var/log/containers
-              - name: varlogpods
-                mountPath: /var/log/pods
-              - name: varlibdockercontainers
-                mountPath: /var/lib/docker/containers
-        volumes:
-          - name: varlogcontainers
-            hostPath: { path: /var/log/containers }
-          - name: varlogpods
-            hostPath: { path: /var/log/pods }
-          - name: varlibdockercontainers
-            hostPath: { path: /var/lib/docker/containers }
+    output.elasticsearch:
+      hosts: ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
+      username: elastic
+      password: ${ELASTIC_PASSWORD}
+      ssl:
+        verification_mode: none

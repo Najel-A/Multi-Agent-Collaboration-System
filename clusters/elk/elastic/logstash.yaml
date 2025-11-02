@@ -8,20 +8,19 @@ spec:
   count: 1
   elasticsearchRefs:
     - name: elasticsearch-sample
-      clusterName: kind-dev # <-- REQUIRED
-      namespace: elastic-system # (explicit is safest)
+      clusterName: elasticsearch-sample
+      namespace: elastic-system
   pipelines:
     - pipeline.id: main
       config.string: |
         input { beats { port => 5044 } }
-        filter { }
         output {
           elasticsearch {
-            hosts => ["${ELASTICSEARCH_HOSTS}"]
-            user  => "${ELASTICSEARCH_USERNAME}"
-            password => "${ELASTICSEARCH_PASSWORD}"
-            cacert => "/usr/share/logstash/config/certs/ca.crt"
-            ilm_enabled => true
+            hosts => ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
+            user => "elastic"
+            password => "${ELASTIC_PASSWORD}"
+            ssl => true
+            ssl_certificate_verification => false
           }
         }
   services:
