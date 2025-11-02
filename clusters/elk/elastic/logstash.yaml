@@ -2,13 +2,34 @@ apiVersion: logstash.k8s.elastic.co/v1alpha1
 kind: Logstash
 metadata:
   name: logstash-sample
+  namespace: elastic-system
 spec:
   version: 8.14.0
   count: 1
   elasticsearchRefs:
     - name: elasticsearch-sample
+      clusterName: kind-dev # <-- REQUIRED
+      namespace: elastic-system # (explicit is safest)
   pipelines:
     - pipeline.id: main
       config.string: |
         input { beats { port => 5044 } }
-        output { elasticsearch { hosts => ["${ELASTICSEARCH_HOSTS}"] } }
+        filter { }
+        output {
+          elasticsearch {
+            hosts => ["${ELASTICSEARCH_HOSTS}"]
+            user  => "${ELASTICSEARCH_USERNAME}"
+            password => "${ELASTICSEARCH_PASSWORD}"
+            cacert => "/usr/share/logstash/config/certs/ca.crt"
+            ilm_enabled => true
+          }
+        }
+  services:
+    - name: beats
+      service:
+        spec:
+          type: ClusterIP
+          ports:
+            - name: beats
+              port: 5044
+              targetPort: 5044
