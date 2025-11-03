@@ -10,7 +10,7 @@ kind create cluster --name dev
 create .env
 
 Flux setup
-run makefile in elastic folder
+cd /clusters/elastic
 
 make
 make apply
