@@ -7,4 +7,4 @@ spec:
   interval: 1m
   url: https://github.com/Najel-A/Multi-Agent-Collaboration-System
   ref:
-    branch: ak-dev-pipeline
+    branch: najel-dev
