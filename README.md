@@ -16,7 +16,7 @@ make
 make apply
 make reconcile
 
-Kibana access:
+Kibana access: IN ROOT DIRECTORY
 kubectl apply -f clusters/elk/helm-repo/helm-repo.yaml
 kubectl apply -f clusters/elk/elastic/eck-operator.yaml
 kubectl port-forward svc/kibana-sample-kb-http 5601:5601 -n elastic-system
