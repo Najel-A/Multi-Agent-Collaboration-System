@@ -3,5 +3,4 @@ kind: Kustomization
 resources:
   - namespace/
   - elastic/
-  - flux-system/
   - helm_repo/
