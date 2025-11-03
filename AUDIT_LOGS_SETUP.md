@@ -33,7 +33,7 @@ This step lets you manually upload the CSV data to Kibana for initial viewing an
 
 5. **Upload bulk data:**
    ```bash
-   curl -X POST "https://localhost:5601/api/console/proxy?path=_bulk&method=POST" \
+   curl -k -X POST "https://localhost:5601/api/console/proxy?path=_bulk&method=POST" \
      -H 'Content-Type: application/json' \
      -u elastic:<password> \
      --data-binary "@bulk-audit-logs.json"
@@ -54,6 +54,16 @@ This step lets you manually upload the CSV data to Kibana for initial viewing an
 ### Step 2: Copy CSV File into KinD Cluster (For Filebeat)
 
 Filebeat needs access to the CSV file inside the Kubernetes cluster. Copy it into KinD:
+
+# 1) Create the dir inside the Kind node
+docker exec dev-control-plane mkdir -p /tmp/audit-logs
+
+# 2) Copy the file into the node
+docker cp test_data/audit-logs.csv dev-control-plane:/tmp/audit-logs/
+
+# 3) Verify
+docker exec dev-control-plane ls -l /tmp/audit-logs
+
 
 ```bash
 # Copy CSV into KinD cluster
