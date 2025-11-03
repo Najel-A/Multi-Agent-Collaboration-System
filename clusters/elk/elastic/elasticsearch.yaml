@@ -10,3 +10,5 @@ spec:
       count: 1
       config:
         node.store.allow_mmap: false
+      nodeSelector:
+        kubernetes.io/arch: arm64 # <-- Najel's hotfix for M-series CPUs, remove if not needed

@@ -19,6 +19,85 @@ spec:
     - pipeline.id: main
       config.string: |
         input { beats { port => 5044 } }
+        
+        filter {
+          # Route CSV audit logs to separate processing
+          if [fields][data_source] == "audit-logs-csv" {
+            # Parse CSV - handle quoted fields properly
+            csv {
+              columns => ["request_stage_json", "timestamp", "user", "verb", "resource_type", "namespace", "resource_name", "api_path", "request_id", "stage", "http_status", "empty1", "empty2", "empty3"]
+              separator => ","
+              quote_char => '"'
+              escape_char => '"'
+              skip_empty_columns => false
+            }
+            
+            # Extract cluster name from JSON in first column
+            # First, clean up escaped quotes in the JSON field
+            if [request_stage_json] {
+              mutate {
+                gsub => [ "request_stage_json", '""', '"' ]
+                gsub => [ "request_stage_json", '^"', '' ]
+                gsub => [ "request_stage_json", '"$', '' ]
+              }
+              
+              json {
+                source => "request_stage_json"
+                target => "request_stage"
+              }
+              
+              if [request_stage][name] {
+                mutate {
+                  add_field => { "cluster_name" => "%{[request_stage][name]}" }
+                }
+              }
+            }
+            
+            # Parse timestamp
+            date {
+              match => [ "timestamp", "ISO8601" ]
+              target => "@timestamp"
+            }
+            
+            # Add severity based on HTTP status
+            if [http_status] {
+              mutate {
+                convert => { "http_status" => "integer" }
+              }
+              
+              if [http_status] >= 200 and [http_status] < 300 {
+                mutate { add_field => { "severity" => "success" } }
+              } else if [http_status] >= 300 and [http_status] < 400 {
+                mutate { add_field => { "severity" => "redirect" } }
+              } else if [http_status] >= 400 and [http_status] < 500 {
+                mutate { add_field => { "severity" => "client_error" } }
+              } else if [http_status] >= 500 {
+                mutate { add_field => { "severity" => "server_error" } }
+              } else {
+                mutate { add_field => { "severity" => "unknown" } }
+              }
+            }
+            
+            # Clean up empty fields
+            mutate {
+              remove_field => [ "empty1", "empty2", "empty3", "request_stage_json", "request_stage" ]
+            }
+            
+            # Set index name for audit logs
+            mutate {
+              add_field => { "[@metadata][index]" => "audit-logs-%{+YYYY.MM.dd}" }
+            }
+          }
+          
+          # Existing container logs processing (keep as-is)
+          else {
+            # Keep existing metadata for container logs
+            mutate {
+              add_field => { "[@metadata][index]" => "filebeat-%{+YYYY.MM.dd}" }
+            }
+          }
+        }
+        
         output {
           elasticsearch {
             hosts  => ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
@@ -26,6 +105,7 @@ spec:
             password => "${elastic}"          # <-- matches key in the secret
             ssl    => true
             ssl_certificate_verification => false
+            index => "%{[@metadata][index]}"
           }
         }
 

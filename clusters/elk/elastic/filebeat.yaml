@@ -23,6 +23,9 @@ spec:
               - name: varlibdockercontainers
                 mountPath: /var/lib/docker/containers
                 readOnly: true
+              - name: audit-logs-data
+                mountPath: /data/audit-logs
+                readOnly: true
         volumes:
           - name: varlog
             hostPath:
@@ -30,14 +33,31 @@ spec:
           - name: varlibdockercontainers
             hostPath:
               path: /var/lib/docker/containers
+          - name: audit-logs-data
+            hostPath:
+              path: /tmp/audit-logs
+              type: DirectoryOrCreate
 
   config:
     filebeat.inputs:
+      # Container logs input (keep existing)
       - type: container
         paths:
           - /var/log/containers/*.log
         processors:
           - add_kubernetes_metadata: {}
+      
+      # CSV audit logs input
+      - type: log
+        enabled: true
+        paths:
+          - /data/audit-logs/*.csv
+        fields:
+          data_source: audit-logs-csv
+        fields_under_root: false
+        # CSV files are single-line records, Filebeat reads entire line as message
+        close_inactive: 5m
+        scan_frequency: 10s
 
     # Route to Logstash (no ES creds needed)
     output.logstash:
