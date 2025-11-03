@@ -10,7 +10,7 @@ kind create cluster --name dev
 create .env
 
 Flux setup
-cd /clusters/elk/elastic
+cd /clusters/elk
 
 make
 make apply
