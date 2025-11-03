@@ -8,7 +8,6 @@ flux-install:
 .PHONY: ns
 ns:
 	kubectl apply -f namespace/flux-namespace.yaml
-	kubectl apply -f namespace/dev-namespace.yaml
 
 .PHONY: render
 render:
@@ -20,9 +19,9 @@ render:
 .PHONY: apply
 apply: ns render
 	kubectl apply -f flux-system/gitrepository.yaml
-	kubectl apply -f flux-system/kustomization.yaml
+	kubectl apply -f flux-system/app-sync.yaml
 
 .PHONY: reconcile
 reconcile:
 	flux reconcile source git app-source -n flux-system
-	flux reconcile kustomization app-sync -n flux-system
+
