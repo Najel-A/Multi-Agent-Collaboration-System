@@ -20,7 +20,6 @@ spec:
       config.string: |
         input { beats { port => 5044 } }
         output {
-          stdout { codec => rubydebug }
           elasticsearch {
             hosts  => ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
             user   => "elastic"
