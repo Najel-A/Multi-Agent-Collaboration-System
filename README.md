@@ -11,6 +11,8 @@ create .env
 
 Flux setup
 run makefile in elastic folder
+
+make
 make apply
 make reconcile
 
