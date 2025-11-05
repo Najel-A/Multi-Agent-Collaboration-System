@@ -26,6 +26,9 @@ spec:
               - name: audit-logs-data
                 mountPath: /data/audit-logs
                 readOnly: true
+              - name: spark-logs-data
+                mountPath: /data/spark-logs
+                readOnly: true
         volumes:
           - name: varlog
             hostPath:
@@ -36,6 +39,10 @@ spec:
           - name: audit-logs-data
             hostPath:
               path: /tmp/audit-logs
+              type: DirectoryOrCreate
+          - name: spark-logs-data
+            hostPath:
+              path: /tmp/spark-logs
               type: DirectoryOrCreate
 
   config:
@@ -58,6 +65,22 @@ spec:
         # CSV files are single-line records, Filebeat reads entire line as message
         close_inactive: 5m
         scan_frequency: 10s
+      
+      # Spark logs input
+      - type: log
+        enabled: true
+        paths:
+          - /data/spark-logs/**/*.log
+        fields:
+          data_source: spark-logs
+          log_type: spark_container
+        fields_under_root: false
+        # Spark logs may have multiline stack traces - match timestamp at start
+        multiline.pattern: '^\d{2}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}'
+        multiline.negate: false
+        multiline.match: after
+        close_inactive: 10m
+        scan_frequency: 30s
 
     # Route to Logstash (no ES creds needed)
     output.logstash:

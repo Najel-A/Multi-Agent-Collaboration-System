@@ -28,7 +28,6 @@ spec:
               columns => ["request_stage_json", "timestamp", "user", "verb", "resource_type", "namespace", "resource_name", "api_path", "request_id", "stage", "http_status", "empty1", "empty2", "empty3"]
               separator => ","
               quote_char => '"'
-              escape_char => '"'
               skip_empty_columns => false
             }
             
