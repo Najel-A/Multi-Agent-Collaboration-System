@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-notebook
+  namespace: spark-nb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spark-notebook
+  template:
+    metadata:
+      labels:
+        app: spark-notebook
+    spec:
+      containers:
+        - name: notebook
+          image: jupyter/pyspark-notebook:latest
+          args:
+            - start-notebook.sh
+            - "--NotebookApp.token=''"
+            - "--NotebookApp.password=''"
+          ports:
+            - containerPort: 8888
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+          env:
+            - name: SPARK_DRIVER_MEMORY
+              value: "512M"
+            - name: SPARK_EXECUTOR_MEMORY
+              value: "512M"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-notebook
+  namespace: spark-nb
+spec:
+  type: ClusterIP
+  selector:
+    app: spark-notebook
+  ports:
+    - name: http
+      port: 8888
+      targetPort: 8888

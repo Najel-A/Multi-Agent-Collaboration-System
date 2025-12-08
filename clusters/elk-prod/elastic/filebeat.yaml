@@ -1,0 +1,60 @@
+apiVersion: beat.k8s.elastic.co/v1beta1
+kind: Beat
+metadata:
+  name: filebeat-sample
+  namespace: elastic-system
+spec:
+  type: filebeat
+  version: 8.14.0
+
+  daemonSet:
+    podTemplate:
+      spec:
+        containers:
+          - name: filebeat
+            securityContext:
+              runAsUser: 0
+            resources:
+              requests:
+                cpu: "50m"
+                memory: "64Mi"
+              limits:
+                cpu: "200m"
+                memory: "200Mi"
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: filebeat-aws-creds
+                    key: AWS_ACCESS_KEY_ID
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: filebeat-aws-creds
+                    key: AWS_SECRET_ACCESS_KEY
+              - name: AWS_REGION
+                valueFrom:
+                  secretKeyRef:
+                    name: filebeat-aws-creds
+                    key: AWS_REGION
+            volumeMounts: []
+        volumes: []
+
+  config:
+    filebeat.inputs:
+      - type: aws-s3
+        id: spark_s3
+        enabled: true
+
+        bucket_arn: "arn:aws:s3:::mas-pipeline-prod"
+        # only this file/key under the bucket
+        bucket_list_prefix: "spark/Spark_logs_enriched.csv"
+
+        # REQUIRED when using bucket_arn
+        number_of_workers: 1
+
+        # how often to re-list the bucket
+        bucket_list_interval: 300s   # 5 minutes
+
+    output.logstash:
+      hosts: ["logstash-sample-ls-beats.elastic-system.svc:5044"]

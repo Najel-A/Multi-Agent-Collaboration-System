@@ -1,0 +1,25 @@
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: kibana-sample
+  namespace: elastic-system
+spec:
+  version: 8.14.0
+  count: 1
+  elasticsearchRef:
+    name: elasticsearch-sample
+  podTemplate:
+    spec:
+      containers:
+        - name: kibana
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "768Mi"      # was 512Mi, give it a bit more room
+          env:
+            # Cap Node.js heap inside the container (MB)
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=512"

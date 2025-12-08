@@ -1,1 +1,5 @@
 clusters/elk/.env
+clusters/elk-aws/.env
+.venv
+clusters/elk-prod/.env
+mistral7b_qlora_out
