@@ -28,3 +28,8 @@ Username : elastic
 Elastic password run the command below
 kubectl -n elastic-system get secret elasticsearch-sample-es-elastic-user \
  -o go-template='{{.data.elastic | base64decode}}{{"\n"}}'
+
+Add data from root folder
+docker exec dev-control-plane mkdir -p /var/log/spark
+docker cp spark/Spark_logs_enriched.csv dev-control-plane:/var/log/spark/Spark_logs_enriched.csv
+
