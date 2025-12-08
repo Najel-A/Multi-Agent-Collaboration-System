@@ -30,22 +30,18 @@ spec:
               cpu: "500m"
               memory: "768Mi"
           env:
-            - name: SPARK_DRIVER_MEMORY
-              value: "512M"
-            - name: SPARK_EXECUTOR_MEMORY
-              value: "512M"
-
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: spark-notebook
-  namespace: spark-nb
-spec:
-  type: ClusterIP
-  selector:
-    app: spark-notebook
-  ports:
-    - name: http
-      port: 8888
-      targetPort: 8888
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: spark-aws-creds
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: spark-aws-creds
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: AWS_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: spark-aws-creds
+                  key: AWS_REGION
