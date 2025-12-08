@@ -30,6 +30,17 @@ spec:
             - name: LS_JAVA_OPTS
               value: "-Xms256m -Xmx256m"
 
+  # 👇 Persistent storage for Logstash
+  volumeClaimTemplates:
+    - metadata:
+        name: logstash-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+        storageClassName: gp2     # your existing StorageClass
+
   pipelines:
     - pipeline.id: main
       config.string: |
