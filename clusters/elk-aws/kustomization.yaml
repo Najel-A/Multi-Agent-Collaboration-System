@@ -4,4 +4,4 @@ resources:
   - namespace/
   - elastic/
   - helm-repo/
-  - spark 
+  - spark/
