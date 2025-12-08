@@ -38,8 +38,11 @@ spec:
       - type: aws-s3
         id: spark_s3
         enabled: true
-        bucket_arn: "arn:aws:s3:::YOUR_BUCKET"
-        # prefix: "spark/output/"
+
+        bucket_arn: "arn:aws:s3:::mas-pipeline-prod"
+        # If you only care about that one file, use the full key as prefix:
+        prefix: "spark/Spark_logs_enriched.csv"
+
         region_name: "us-west-2"
         interval: 5m
 
