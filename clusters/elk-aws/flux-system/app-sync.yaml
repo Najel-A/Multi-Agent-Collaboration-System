@@ -8,7 +8,7 @@ spec:
   sourceRef:
     kind: GitRepository
     name: app-source
-  path: ./clusters/elk # <-- this is where your cluster stuff lives
+  path: ./clusters/elk-aws # <-- this is where your cluster stuff lives
   prune: true
   wait: true
   timeout: 5m0s
