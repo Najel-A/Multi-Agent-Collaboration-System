@@ -40,11 +40,14 @@ spec:
         enabled: true
 
         bucket_arn: "arn:aws:s3:::mas-pipeline-prod"
-        # If you only care about that one file, use the full key as prefix:
-        prefix: "spark/Spark_logs_enriched.csv"
+        # only this file/key under the bucket
+        bucket_list_prefix: "spark/Spark_logs_enriched.csv"
 
-        region_name: "us-west-2"
-        interval: 5m
+        # REQUIRED when using bucket_arn
+        number_of_workers: 1
+
+        # how often to re-list the bucket
+        bucket_list_interval: 300s   # 5 minutes
 
     output.logstash:
       hosts: ["logstash-sample-ls-beats.elastic-system.svc:5044"]
