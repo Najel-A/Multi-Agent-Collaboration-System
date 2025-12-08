@@ -18,4 +18,8 @@ spec:
               memory: "512Mi"
             limits:
               cpu: "500m"
-              memory: "512Mi"
+              memory: "768Mi"      # was 512Mi, give it a bit more room
+          env:
+            # Cap Node.js heap inside the container (MB)
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=512"
