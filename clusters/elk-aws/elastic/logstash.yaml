@@ -10,23 +10,52 @@ spec:
   elasticsearchRefs:
     - name: elasticsearch-sample
       namespace: elastic-system
-      clusterName: kind-dev # <-- REQUIRED
+      clusterName: kind-dev
 
   secureSettings:
-    - secretName: elasticsearch-sample-es-elastic-user # key name is "elastic"
+    - secretName: elasticsearch-sample-es-elastic-user  # key name is "elastic"
 
   pipelines:
     - pipeline.id: main
       config.string: |
-        input { beats { port => 5044 } }
+        input {
+          beats {
+            port => 5044
+          }
+        }
+
+        filter {
+          # Parse CSV from Filebeat (Spark_logs_enriched.csv)
+          csv {
+            separator => ","
+            autodetect_column_names => true
+          }
+
+          # Optional cleanup / normalization
+          mutate {
+            # Content -> message (more standard for logs)
+            rename => { "Content" => "message" }
+
+            # Convert numeric fields
+            convert => {
+              "LineId"      => "integer"
+              "Occurrences" => "integer"
+            }
+          }
+        }
+
         output {
           elasticsearch {
-            hosts  => ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
-            user   => "elastic"
-            password => "${elastic}"          # <-- matches key in the secret
-            ssl    => true
+            hosts    => ["https://elasticsearch-sample-es-http.elastic-system.svc:9200"]
+            user     => "elastic"
+            password => "${elastic}"   # from secureSettings secret
+            index    => "spark-logs-%{+YYYY.MM.dd}"
+            ssl      => true
             ssl_certificate_verification => false
           }
+
+          # Good for debugging
+          stdout { codec => rubydebug }
         }
 
   services:
