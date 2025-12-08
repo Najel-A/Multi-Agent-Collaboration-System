@@ -22,18 +22,14 @@ spec:
             - "--NotebookApp.password=''"
           ports:
             - containerPort: 8888
-volumes:
-  - name: es-truststore
-    secret:
-      secretName: es-truststore
-
-containers:
-  - name: jupyter
-    volumeMounts:
-      - name: es-truststore
-        mountPath: /opt/es-truststore
-        readOnly: true
-
+          volumeMounts:
+            - name: es-truststore
+              mountPath: /opt/es-truststore
+              readOnly: true
+      volumes:
+        - name: es-truststore
+          secret:
+            secretName: es-truststore
 ---
 apiVersion: v1
 kind: Service
@@ -48,4 +44,3 @@ spec:
     - name: http
       port: 8888
       targetPort: 8888
-
