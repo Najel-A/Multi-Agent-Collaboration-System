@@ -14,31 +14,34 @@ spec:
           - name: filebeat
             securityContext:
               runAsUser: 0
-            volumeMounts:
-              - name: varlog
-                mountPath: /var/log
-              - name: varlibdockercontainers
-                mountPath: /var/lib/docker/containers
-                readOnly: true
-        volumes:
-          - name: varlog
-            hostPath:
-              path: /var/log
-          - name: varlibdockercontainers
-            hostPath:
-              path: /var/lib/docker/containers
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: filebeat-aws-creds
+                    key: AWS_ACCESS_KEY_ID
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: filebeat-aws-creds
+                    key: AWS_SECRET_ACCESS_KEY
+              - name: AWS_REGION
+                valueFrom:
+                  secretKeyRef:
+                    name: filebeat-aws-creds
+                    key: AWS_REGION
+            volumeMounts: []
+        volumes: []
 
   config:
     filebeat.inputs:
-      # Read the merged/enriched CSV file
-      - type: filestream
-        id: spark_csv
+      - type: aws-s3
+        id: spark_s3
         enabled: true
-        paths:
-          - /var/log/spark/Spark_logs_enriched.csv
-        # optional: stop after reaching EOF (good for batch files)
-        close_eof: true
+        bucket_arn: "arn:aws:s3:::YOUR_BUCKET"
+        # prefix: "spark/output/"
+        region_name: "us-west-2"
+        interval: 5m
 
-    # Route to Logstash
     output.logstash:
       hosts: ["logstash-sample-ls-beats.elastic-system.svc:5044"]
