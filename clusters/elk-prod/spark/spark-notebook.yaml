@@ -22,6 +22,18 @@ spec:
             - "--NotebookApp.password=''"
           ports:
             - containerPort: 8888
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "512Mi"
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+          env:
+            - name: SPARK_DRIVER_MEMORY
+              value: "512M"
+            - name: SPARK_EXECUTOR_MEMORY
+              value: "512M"
 
 ---
 apiVersion: v1
@@ -37,4 +49,3 @@ spec:
     - name: http
       port: 8888
       targetPort: 8888
-
