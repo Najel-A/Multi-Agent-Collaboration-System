@@ -45,3 +45,17 @@ spec:
                 secretKeyRef:
                   name: spark-aws-creds
                   key: AWS_REGION
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-notebook
+  namespace: spark-nb
+spec:
+  type: ClusterIP
+  selector:
+    app: spark-notebook
+  ports:
+    - name: http
+      port: 8888
+      targetPort: 8888
