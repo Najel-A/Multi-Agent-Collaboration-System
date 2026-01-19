@@ -10,7 +10,7 @@ spec:
   elasticsearchRefs:
     - name: elasticsearch-sample
       namespace: elastic-system
-      clusterName: kind-monitoring-elk # <-- REQUIRED
+      clusterName: kind-monitoring-cluster-qa # <-- REQUIRED
 
   secureSettings:
     - secretName: elasticsearch-sample-es-elastic-user # key name is "elastic"
