@@ -6,3 +6,4 @@ resources:
   - helm-repo/
   # - thanos/
   - kafka/
+  - operators/
