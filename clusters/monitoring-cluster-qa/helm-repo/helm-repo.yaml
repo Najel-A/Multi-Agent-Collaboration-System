@@ -6,3 +6,11 @@ metadata:
 spec:
   url: https://helm.elastic.co
   interval: 1h
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: strimzi
+  namespace: flux-system
+spec:
+  interval: 30m
+  url: https://strimzi.io/charts/

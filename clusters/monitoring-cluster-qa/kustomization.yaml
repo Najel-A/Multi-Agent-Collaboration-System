@@ -4,5 +4,5 @@ resources:
   - namespace/
   - elastic/
   - helm-repo/
-  - thanos/
+  # - thanos/
   - kafka/
