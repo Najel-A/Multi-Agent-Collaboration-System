@@ -6,6 +6,7 @@ metadata:
 spec:
   url: https://helm.elastic.co
   interval: 1h
+---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
