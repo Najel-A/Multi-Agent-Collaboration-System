@@ -4,3 +4,4 @@ resources:
   - flux-namespace.yaml
   - thanos-namespace.yaml
   - elastic-system-namespace.yaml
+  - kafka-namespace.yaml
