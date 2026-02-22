@@ -8,9 +8,16 @@ spec:
   mode: cluster
   sparkVersion: "3.5.1"
   image: spark:python3
-  imagePullPolicy: IfNotPresent
 
   mainApplicationFile: local:///opt/spark/work-dir/train_pipeline.py
+
+  arguments:
+    - "--raw"
+    - "s3a://YOUR_BUCKET/raw/"
+    - "--checkpoint"
+    - "s3a://YOUR_BUCKET/checkpoints/train-pipeline/"
+    - "--processed"
+    - "s3a://YOUR_BUCKET/processed/"
 
   deps:
     packages:
@@ -36,8 +43,8 @@ spec:
     serviceAccount: spark
     volumeMounts:
       - name: app-script
-        mountPath: /opt/spark/work-dir/train_pipeline.py   # <-- mount a FILE, not the dir
-        subPath: train_pipeline.py                         # <-- key inside ConfigMap
+        mountPath: /opt/spark/work-dir/train_pipeline.py
+        subPath: train_pipeline.py
 
   executor:
     instances: 2
