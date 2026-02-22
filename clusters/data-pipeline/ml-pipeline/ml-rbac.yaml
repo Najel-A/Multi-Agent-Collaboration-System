@@ -3,9 +3,6 @@ kind: ServiceAccount
 metadata:
   name: spark
   namespace: ml-pipelines
-  # If you’re on EKS with IRSA later, add:
-  # annotations:
-  #   eks.amazonaws.com/role-arn: arn:aws:iam::<acct>:role/<role-name>
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -14,8 +11,22 @@ metadata:
   namespace: ml-pipelines
 rules:
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "configmaps", "events"]
-    verbs: ["get", "list", "watch", "create", "delete", "deletecollection", "patch", "update"]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - configmaps
+      - events
+      - persistentvolumeclaims
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+      - deletecollection
+      - patch
+      - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
