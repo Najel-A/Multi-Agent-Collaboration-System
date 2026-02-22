@@ -26,6 +26,6 @@ spec:
 
     metrics:
       enable: true
-
-    # Let SparkApplications run in ANY namespace (we’ll create RBAC below for ml-pipelines)
-    sparkJobNamespace: ""
+    controller:
+      namespaces: []
+    
