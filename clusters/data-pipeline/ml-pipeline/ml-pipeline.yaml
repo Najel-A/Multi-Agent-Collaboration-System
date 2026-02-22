@@ -19,6 +19,8 @@ spec:
     - "s3a://ml-data/checkpoints/train-pipeline/"
     - "--processed"
     - "s3a://ml-data/processed/"
+    - "--format"
+    - "json"   # change to csv/parquet as needed
 
   deps:
     packages:
@@ -32,6 +34,8 @@ spec:
     "spark.hadoop.fs.s3a.connection.ssl.enabled": "false"
     "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.EnvironmentVariableCredentialsProvider"
     "spark.jars.ivy": "/tmp/.ivy2"
+    "spark.hadoop.fs.s3a.fast.upload": "true"
+    "spark.hadoop.fs.s3a.connection.maximum": "200"
 
   restartPolicy:
     type: Always
@@ -58,8 +62,7 @@ spec:
             key: AWS_SECRET_ACCESS_KEY
     volumeMounts:
       - name: app-script
-        mountPath: /opt/spark/work-dir/train_pipeline.py
-        subPath: train_pipeline.py
+        mountPath: /opt/spark/work-dir
 
   executor:
     instances: 2
@@ -78,5 +81,4 @@ spec:
             key: AWS_SECRET_ACCESS_KEY
     volumeMounts:
       - name: app-script
-        mountPath: /opt/spark/work-dir/train_pipeline.py
-        subPath: train_pipeline.py
+        mountPath: /opt/spark/work-dir
