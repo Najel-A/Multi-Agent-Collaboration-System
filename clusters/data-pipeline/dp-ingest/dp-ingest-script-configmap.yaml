@@ -18,32 +18,20 @@ data:
         spark.sparkContext.setLogLevel("WARN")
 
         # JSONL = one JSON object per line
+        # NOTE: We avoid _corrupt_record because it may not be created reliably.
         df = (spark.read
               .format("json")
               .option("multiLine", "false")
-              .option("mode", "PERMISSIVE")
-              .option("columnNameOfCorruptRecord", "_corrupt_record")
               .load(args.input))
 
         df = (df
               .withColumn("ingest_date", F.current_date())
               .withColumn("source_file", F.input_file_name()))
 
-        # Keep corrupt records too (optional). If you want to drop them, filter them out.
-        good = df.filter(F.col("_corrupt_record").isNull()).drop("_corrupt_record")
-        bad  = df.filter(F.col("_corrupt_record").isNotNull())
-
-        (good.write
-             .mode("append")
-             .partitionBy("ingest_date")
-             .parquet(args.output.rstrip("/") + "/good"))
-
-        # Save bad lines for debugging
-        if not bad.rdd.isEmpty():
-            (bad.write
-                .mode("append")
-                .partitionBy("ingest_date")
-                .json(args.output.rstrip("/") + "/bad"))
+        (df.write
+           .mode("append")
+           .partitionBy("ingest_date")
+           .parquet(args.output.rstrip("/") + "/good"))
 
         spark.stop()
 
