@@ -10,7 +10,7 @@ spec:
   image: spark:3.5.1-python3
   imagePullPolicy: IfNotPresent
 
-  mainApplicationFile: local:///opt/spark/work-dir/train_pipeline.py
+  mainApplicationFile: local:///opt/spark/app/train_pipeline.py
 
   arguments:
     - "--raw"
