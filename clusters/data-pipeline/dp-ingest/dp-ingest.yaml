@@ -1,7 +1,7 @@
 apiVersion: sparkoperator.k8s.io/v1beta2
 kind: SparkApplication
 metadata:
-  name: auto-train-pipeline
+  name: ingest-csv-to-parquet
   namespace: dp-ingest
 spec:
   type: Python
@@ -13,13 +13,13 @@ spec:
   mainApplicationFile: local:///opt/spark/app/train_pipeline.py
   arguments:
     - "--raw"
-    - "s3a://mas-pipeline-prod/raw/"
+    - "s3a://mas-pipeline-prod/spark_data_processing/ingest_data/unclean_data/"
     - "--checkpoint"
-    - "s3a://mas-pipeline-prod/checkpoints/train-pipeline/"
+    - "s3a://mas-pipeline-prod/spark_data_processing/ingest_data/checkpoints/ingest-csv-parquet/"
     - "--processed"
-    - "s3a://mas-pipeline-prod/processed/"
+    - "s3a://mas-pipeline-prod/spark_data_processing/ingest_data/clean_data/"
     - "--format"
-    - "csv"
+    - "json"
     - "--trigger"
     - "2 minutes"
 
