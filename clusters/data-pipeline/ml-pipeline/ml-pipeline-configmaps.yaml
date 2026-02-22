@@ -7,13 +7,14 @@ data:
   train_pipeline.py: |
     import argparse
     from pyspark.sql import SparkSession, functions as F
+    from pyspark.sql.types import StructType, StructField, IntegerType
 
     def main():
         p = argparse.ArgumentParser()
         p.add_argument("--raw", required=True)
         p.add_argument("--checkpoint", required=True)
         p.add_argument("--processed", required=True)
-        p.add_argument("--format", default="parquet", choices=["parquet", "csv", "json"])
+        p.add_argument("--format", default="csv", choices=["parquet", "csv", "json"])
         p.add_argument("--trigger", default="2 minutes", help='e.g. "30 seconds", "2 minutes"')
         args = p.parse_args()
 
@@ -22,15 +23,25 @@ data:
 
         reader = spark.readStream.format(args.format)
 
-        # CSV/JSON options for quick local testing
+        # Explicit schema is REQUIRED for streaming CSV/JSON
+        schema = StructType([
+            StructField("id", IntegerType(), True),
+            StructField("value", IntegerType(), True),
+        ])
+
         if args.format == "csv":
             reader = (
                 reader.option("header", "true")
-                      .option("inferSchema", "true")
+                      .option("mode", "PERMISSIVE")
+                      .option("columnNameOfCorruptRecord", "_corrupt_record")
+                      .schema(schema)
             )
         elif args.format == "json":
             # If your JSON is multi-line, set multiLine=true
-            reader = reader.option("multiLine", "false")
+            reader = reader.option("multiLine", "false").schema(schema)
+        else:
+            # Parquet schema is embedded; schema() is optional
+            pass
 
         df = reader.load(args.raw)
 
@@ -38,11 +49,9 @@ data:
         df = df.withColumn("event_date", F.current_date())
 
         def foreach_batch(batch_df, batch_id):
-            # This log line helps confirm the stream is alive
-            count = batch_df.count()
-            print(f"[foreachBatch] batch_id={batch_id}, rows={count}")
-
-            if count == 0:
+            # Avoid count(): it's a full scan + you write again (double work)
+            if batch_df.rdd.isEmpty():
+                print(f"[foreachBatch] batch_id={batch_id}, rows=0")
                 return
 
             out = batch_df.withColumn("batch_id", F.lit(int(batch_id)))
@@ -51,6 +60,8 @@ data:
                 .mode("append")
                 .partitionBy("event_date")
                 .parquet(args.processed))
+
+            print(f"[foreachBatch] batch_id={batch_id} wrote batch")
 
         q = (
             df.writeStream
