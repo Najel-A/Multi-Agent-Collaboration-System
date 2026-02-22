@@ -62,7 +62,7 @@ spec:
             key: AWS_SECRET_ACCESS_KEY
     volumeMounts:
       - name: app-script
-        mountPath: /opt/spark/work-dir
+        mountPath: /opt/spark/app
 
   executor:
     instances: 2
@@ -81,4 +81,4 @@ spec:
             key: AWS_SECRET_ACCESS_KEY
     volumeMounts:
       - name: app-script
-        mountPath: /opt/spark/work-dir
+        mountPath: /opt/spark/app
