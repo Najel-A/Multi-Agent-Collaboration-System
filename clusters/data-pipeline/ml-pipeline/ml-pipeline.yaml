@@ -13,11 +13,11 @@ spec:
   mainApplicationFile: local:///opt/spark/app/train_pipeline.py
   arguments:
     - "--raw"
-    - "s3a://ml-data/raw/"
+    - "s3a://mas-pipeline-prod/raw/"
     - "--checkpoint"
-    - "s3a://ml-data/checkpoints/train-pipeline/"
+    - "s3a://mas-pipeline-prod/checkpoints/train-pipeline/"
     - "--processed"
-    - "s3a://ml-data/processed/"
+    - "s3a://mas-pipeline-prod/processed/"
     - "--format"
     - "csv"
     - "--trigger"
@@ -30,10 +30,8 @@ spec:
 
   sparkConf:
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
-    "spark.hadoop.fs.s3a.endpoint": "http://minio.minio.svc.cluster.local:9000"
-    "spark.hadoop.fs.s3a.path.style.access": "true"
-    "spark.hadoop.fs.s3a.connection.ssl.enabled": "false"
     "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.EnvironmentVariableCredentialsProvider"
+    "spark.hadoop.fs.s3a.endpoint.region": "us-west-2"
     "spark.jars.ivy": "/tmp/.ivy2"
     "spark.hadoop.fs.s3a.fast.upload": "true"
     "spark.hadoop.fs.s3a.connection.maximum": "200"
@@ -54,13 +52,17 @@ spec:
       - name: AWS_ACCESS_KEY_ID
         valueFrom:
           secretKeyRef:
-            name: minio-s3-creds
+            name: aws-creds
             key: AWS_ACCESS_KEY_ID
       - name: AWS_SECRET_ACCESS_KEY
         valueFrom:
           secretKeyRef:
-            name: minio-s3-creds
+            name: aws-creds
             key: AWS_SECRET_ACCESS_KEY
+      - name: AWS_REGION
+        value: "us-west-2"
+      - name: AWS_DEFAULT_REGION
+        value: "us-west-2"
     volumeMounts:
       - name: app-script
         mountPath: /opt/spark/app
@@ -73,13 +75,17 @@ spec:
       - name: AWS_ACCESS_KEY_ID
         valueFrom:
           secretKeyRef:
-            name: minio-s3-creds
+            name: aws-creds
             key: AWS_ACCESS_KEY_ID
       - name: AWS_SECRET_ACCESS_KEY
         valueFrom:
           secretKeyRef:
-            name: minio-s3-creds
+            name: aws-creds
             key: AWS_SECRET_ACCESS_KEY
+      - name: AWS_REGION
+        value: "us-west-2"
+      - name: AWS_DEFAULT_REGION
+        value: "us-west-2"
     volumeMounts:
       - name: app-script
         mountPath: /opt/spark/app
