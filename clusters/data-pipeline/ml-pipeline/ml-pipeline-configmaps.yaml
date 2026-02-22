@@ -13,26 +13,53 @@ data:
         p.add_argument("--raw", required=True)
         p.add_argument("--checkpoint", required=True)
         p.add_argument("--processed", required=True)
+        p.add_argument("--format", default="parquet", choices=["parquet", "csv", "json"])
+        p.add_argument("--trigger", default="2 minutes", help='e.g. "30 seconds", "2 minutes"')
         args = p.parse_args()
 
         spark = SparkSession.builder.appName("auto-train-pipeline").getOrCreate()
         spark.sparkContext.setLogLevel("WARN")
 
-        # File-stream: stays alive, processes new files as they land
-        df = spark.readStream.format("parquet").load(args.raw)
+        reader = spark.readStream.format(args.format)
+
+        # CSV/JSON options for quick local testing
+        if args.format == "csv":
+            reader = (
+                reader.option("header", "true")
+                      .option("inferSchema", "true")
+            )
+        elif args.format == "json":
+            # If your JSON is multi-line, set multiLine=true
+            reader = reader.option("multiLine", "false")
+
+        df = reader.load(args.raw)
+
+        # Add a processing date partition for outputs
+        df = df.withColumn("event_date", F.current_date())
 
         def foreach_batch(batch_df, batch_id):
-            # TODO: replace with your real transforms + training
+            # This log line helps confirm the stream is alive
+            count = batch_df.count()
+            print(f"[foreachBatch] batch_id={batch_id}, rows={count}")
+
+            if count == 0:
+                return
+
             out = batch_df.withColumn("batch_id", F.lit(int(batch_id)))
-            out.write.mode("append").parquet(args.processed)
+
+            (out.write
+                .mode("append")
+                .partitionBy("event_date")
+                .parquet(args.processed))
 
         q = (
             df.writeStream
               .foreachBatch(foreach_batch)
               .option("checkpointLocation", args.checkpoint)
-              .trigger(processingTime="2 minutes")
+              .trigger(processingTime=args.trigger)
               .start()
         )
+
         q.awaitTermination()
 
     if __name__ == "__main__":
