@@ -9,8 +9,8 @@ spec:
   image: spark:3.5.1
   imagePullPolicy: IfNotPresent
   mainClass: org.apache.spark.examples.SparkPi
-  mainApplicationFile: local:///opt/spark/examples/jars/spark-examples_2.12-3.5.0.jar
-  sparkVersion: "3.5.0"
+  mainApplicationFile: local:///opt/spark/examples/jars/spark-examples_2.12-3.5.1.jar
+  sparkVersion: "3.5.1"
   restartPolicy:
     type: Never
   driver:
