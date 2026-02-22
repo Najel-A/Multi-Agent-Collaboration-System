@@ -11,13 +11,6 @@ spec:
   imagePullPolicy: IfNotPresent
 
   mainApplicationFile: local:///opt/spark/work-dir/train_pipeline.py
-  arguments:
-    - "--raw"
-    - "s3a://YOUR_BUCKET/raw/"
-    - "--checkpoint"
-    - "s3a://YOUR_BUCKET/checkpoints/train-pipeline/"
-    - "--processed"
-    - "s3a://YOUR_BUCKET/processed/"
 
   deps:
     packages:
@@ -32,13 +25,19 @@ spec:
   restartPolicy:
     type: Always
 
+  volumes:
+    - name: app-script
+      configMap:
+        name: auto-train-script
+
   driver:
     cores: 1
     memory: "2g"
     serviceAccount: spark
     volumeMounts:
       - name: app-script
-        mountPath: /opt/spark/work-dir
+        mountPath: /opt/spark/work-dir/train_pipeline.py   # <-- mount a FILE, not the dir
+        subPath: train_pipeline.py                         # <-- key inside ConfigMap
 
   executor:
     instances: 2
@@ -46,9 +45,5 @@ spec:
     memory: "2g"
     volumeMounts:
       - name: app-script
-        mountPath: /opt/spark/work-dir
-
-  volumes:
-    - name: app-script
-      configMap:
-        name: auto-train-script
+        mountPath: /opt/spark/work-dir/train_pipeline.py
+        subPath: train_pipeline.py
