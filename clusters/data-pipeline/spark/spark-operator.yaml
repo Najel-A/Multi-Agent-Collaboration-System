@@ -23,9 +23,9 @@ spec:
     # Optional but recommended
     webhook:
       enable: true
-
     metrics:
       enable: true
     controller:
-      namespaces: []
+      namespaces:
+      - ml-pipelines
     
