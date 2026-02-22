@@ -20,12 +20,12 @@ spec:
     crds: CreateReplace
 
   values:
-    # Optional but recommended
+    spark:
+      jobNamespaces:
+        - ml-pipelines
     webhook:
       enable: true
     metrics:
       enable: true
-    controller:
-      jobNamespaces:
-      - ml-pipelines
+
     
