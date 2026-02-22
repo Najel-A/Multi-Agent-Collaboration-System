@@ -19,17 +19,18 @@ spec:
     - "--processed"
     - "s3a://YOUR_BUCKET/processed/"
 
-  # Keep it up if driver dies/restarts
+  deps:
+    packages:
+      - org.apache.hadoop:hadoop-aws:3.3.4
+      - com.amazonaws:aws-java-sdk-bundle:1.12.262
+
+  sparkConf:
+    "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.DefaultAWSCredentialsProviderChain"
+    "spark.jars.ivy": "/tmp/.ivy2"
+
   restartPolicy:
     type: Always
-    onFailureRetryInterval: 10
-    onSubmissionFailureRetryInterval: 20
-  # RestartPolicy valid types: Never/OnFailure/Always :contentReference[oaicite:1]{index=1}
-
-  volumes:
-    - name: app-script
-      configMap:
-        name: auto-train-script
 
   driver:
     cores: 1
@@ -38,6 +39,7 @@ spec:
     volumeMounts:
       - name: app-script
         mountPath: /opt/spark/work-dir
+
   executor:
     instances: 2
     cores: 1
@@ -45,3 +47,8 @@ spec:
     volumeMounts:
       - name: app-script
         mountPath: /opt/spark/work-dir
+
+  volumes:
+    - name: app-script
+      configMap:
+        name: auto-train-script
