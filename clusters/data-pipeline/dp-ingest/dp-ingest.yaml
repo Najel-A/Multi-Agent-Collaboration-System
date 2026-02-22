@@ -42,7 +42,7 @@ spec:
   volumes:
     - name: app-script
       configMap:
-        name: auto-train-script
+        name: ingest-jsonl-script
 
   driver:
     cores: 1
