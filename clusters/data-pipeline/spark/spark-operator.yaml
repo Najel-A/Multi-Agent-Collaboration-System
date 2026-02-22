@@ -26,6 +26,6 @@ spec:
     metrics:
       enable: true
     controller:
-      jobNamespacesnamespaces:
+      jobNamespaces:
       - ml-pipelines
     
