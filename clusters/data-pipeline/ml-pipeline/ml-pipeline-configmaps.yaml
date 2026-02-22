@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auto-train-script
+  namespace: ml-pipelines
+data:
+  train_pipeline.py: |
+    import argparse
+    from pyspark.sql import SparkSession, functions as F
+
+    def main():
+        p = argparse.ArgumentParser()
+        p.add_argument("--raw", required=True)
+        p.add_argument("--checkpoint", required=True)
+        p.add_argument("--processed", required=True)
+        args = p.parse_args()
+
+        spark = SparkSession.builder.appName("auto-train-pipeline").getOrCreate()
+        spark.sparkContext.setLogLevel("WARN")
+
+        # File-stream: stays alive, processes new files as they land
+        df = spark.readStream.format("parquet").load(args.raw)
+
+        def foreach_batch(batch_df, batch_id):
+            # TODO: replace with your real transforms + training
+            out = batch_df.withColumn("batch_id", F.lit(int(batch_id)))
+            out.write.mode("append").parquet(args.processed)
+
+        q = (
+            df.writeStream
+              .foreachBatch(foreach_batch)
+              .option("checkpointLocation", args.checkpoint)
+              .trigger(processingTime="2 minutes")
+              .start()
+        )
+        q.awaitTermination()
+
+    if __name__ == "__main__":
+        main()
