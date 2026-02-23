@@ -25,7 +25,6 @@ spec:
         - ml-pipelines
         - dp-clean
         - dp-ingest
-        - dp-train
     webhook:
       enable: true
     metrics:
