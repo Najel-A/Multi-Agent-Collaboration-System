@@ -4,8 +4,9 @@ metadata:
   name: log-train-job
   namespace: ray
 spec:
-  # IMPORTANT: selector is a STRING in your CRD version
-  clusterSelector: 'ray.io/cluster=ray-cluster'
+  # IMPORTANT: your CRD expects a MAP here
+  clusterSelector:
+    ray.io/cluster: ray-cluster
 
   entrypoint: "python /app/train_ray.py"
   shutdownAfterJobFinishes: true
