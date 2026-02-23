@@ -18,10 +18,10 @@ spec:
     - "--output"
     - "s3a://mas-pipeline-prod/spark_data_processing/ingest_data/clean_data/"
 
-  # deps:
-  #   packages:
-  #     - org.apache.hadoop:hadoop-aws:3.3.4
-  #     - com.amazonaws:aws-java-sdk-bundle:1.12.262
+  deps:
+    packages:
+      - org.apache.hadoop:hadoop-aws:3.3.4
+      - com.amazonaws:aws-java-sdk-bundle:1.12.262
 
   sparkConf:
     "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
@@ -30,7 +30,7 @@ spec:
     "spark.jars.ivy": "/tmp/.ivy2"
     "spark.hadoop.fs.s3a.fast.upload": "true"
     "spark.hadoop.fs.s3a.connection.maximum": "200"
-    spark.jars: "local:///opt/spark/jars/hadoop-aws-3.3.4.jar,local:///opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar"
+    # spark.jars: "local:///opt/spark/jars/hadoop-aws-3.3.4.jar,local:///opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar"
 
   restartPolicy:
     type: Never
