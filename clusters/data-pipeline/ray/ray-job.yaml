@@ -1,0 +1,24 @@
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: log-train-job
+  namespace: ray
+spec:
+  entrypoint: "python /app/train_ray.py"
+  shutdownAfterJobFinishes: true
+
+  clusterSelector:
+    matchLabels:
+      ray.io/cluster: ray-cluster
+
+  runtimeEnvYAML: |
+    pip:
+      - pandas
+      - pyarrow
+      - s3fs
+      - scikit-learn
+      - joblib
+
+  envVars:
+    DATA_PATH: "s3://mas-pipeline-prod/processed/your_dataset/"
+    AWS_DEFAULT_REGION: "us-west-2"
