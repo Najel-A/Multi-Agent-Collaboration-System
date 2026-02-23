@@ -22,3 +22,4 @@ spec:
   sourceRef:
     kind: GitRepository
     name: app-source
+# flux reconcile kustomization production-sync -n flux-system --with-source
