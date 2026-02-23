@@ -15,6 +15,11 @@ spec:
         containers:
           - name: ray-head
             image: rayproject/ray:2.9.3-py310
+            env:
+              - name: DATA_PATH
+                value: "s3://mas-pipeline-prod/processed/your_dataset/"
+              - name: AWS_DEFAULT_REGION
+                value: "us-west-2"
             ports:
               - containerPort: 6379
                 name: gcs
@@ -41,6 +46,11 @@ spec:
           containers:
             - name: ray-worker
               image: rayproject/ray:2.9.3-py310
+              env:
+                - name: DATA_PATH
+                  value: "s3://mas-pipeline-prod/processed/your_dataset/"
+                - name: AWS_DEFAULT_REGION
+                  value: "us-west-2"
               resources:
                 requests:
                   cpu: "4"
