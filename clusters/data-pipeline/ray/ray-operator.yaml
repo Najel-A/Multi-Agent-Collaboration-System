@@ -23,8 +23,3 @@ spec:
   upgrade:
     remediation:
       retries: 3
-
-  values:
-    # safe defaults; operator creates CRDs + controllers
-    image:
-      repository: rayproject/kuberay-operator
