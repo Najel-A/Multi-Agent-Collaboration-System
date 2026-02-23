@@ -45,7 +45,14 @@ spec:
                 value: "router_baseline"
               - name: NUM_WORKERS
                 value: "2"
-
+              - name: USE_QWEN_4BIT
+                value: "0"
+              - name: CPU_FALLBACK_MODEL
+                value: "distilbert-base-uncased"
+              # - name: USE_QWEN_4BIT
+              #   value: "1"
+              # - name: QWEN_MODEL_NAME
+              #   value: "Qwen/Qwen2.5-7B-Instruct"
             ports:
               - containerPort: 6379
                 name: gcs
