@@ -1,7 +1,7 @@
 apiVersion: sparkoperator.k8s.io/v1beta2
 kind: SparkApplication
 metadata:
-  name: auto-train-pipeline
+  name: dp-clean-strict
   namespace: dp-clean
 spec:
   type: Python
@@ -10,18 +10,14 @@ spec:
   image: spark:3.5.1-python3
   imagePullPolicy: IfNotPresent
 
-  mainApplicationFile: local:///opt/spark/app/train_pipeline.py
+  mainApplicationFile: local:///opt/spark/app/clean_strict.py
   arguments:
-    - "--raw"
-    - "s3a://mas-pipeline-prod/raw/"
-    - "--checkpoint"
-    - "s3a://mas-pipeline-prod/checkpoints/train-pipeline/"
-    - "--processed"
-    - "s3a://mas-pipeline-prod/processed/"
-    - "--format"
-    - "csv"
-    - "--trigger"
-    - "2 minutes"
+    - "--input"
+    - "s3a://mas-pipeline-prod/spark_data_processing/ingest_data/clean_data/good/"
+    - "--output"
+    - "s3a://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict/"
+    - "--bad_output"
+    - "s3a://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict_bad/"
 
   deps:
     packages:
@@ -29,7 +25,7 @@ spec:
       - com.amazonaws:aws-java-sdk-bundle:1.12.262
 
   sparkConf:
-    "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3AFileSystem"
     "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.EnvironmentVariableCredentialsProvider"
     "spark.hadoop.fs.s3a.endpoint.region": "us-west-2"
     "spark.jars.ivy": "/tmp/.ivy2"
@@ -37,16 +33,16 @@ spec:
     "spark.hadoop.fs.s3a.connection.maximum": "200"
 
   restartPolicy:
-    type: Always
+    type: Never
 
   volumes:
     - name: app-script
       configMap:
-        name: auto-train-script
+        name: dp-clean-script
 
   driver:
     cores: 1
-    memory: "2g"
+    memory: "3g"
     serviceAccount: spark
     env:
       - name: AWS_ACCESS_KEY_ID
@@ -70,7 +66,7 @@ spec:
   executor:
     instances: 2
     cores: 1
-    memory: "2g"
+    memory: "3g"
     env:
       - name: AWS_ACCESS_KEY_ID
         valueFrom:
