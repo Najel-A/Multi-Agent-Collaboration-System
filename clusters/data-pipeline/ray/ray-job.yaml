@@ -4,11 +4,10 @@ metadata:
   name: log-train-job
   namespace: ray
 spec:
-  # IMPORTANT: your CRD expects a MAP here
   clusterSelector:
     ray.io/cluster: ray-cluster
 
-  entrypoint: "python /app/train_ray.py"
+  entrypoint: "python /app/train.py"
   shutdownAfterJobFinishes: true
 
   runtimeEnvYAML: |
@@ -17,4 +16,3 @@ spec:
       - pyarrow
       - s3fs
       - scikit-learn
-      - joblib

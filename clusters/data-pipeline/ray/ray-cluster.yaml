@@ -7,19 +7,43 @@ metadata:
     ray.io/cluster: ray-cluster
 spec:
   rayVersion: "2.9.3"
+
   headGroupSpec:
     rayStartParams:
       dashboard-host: "0.0.0.0"
     template:
       spec:
+        volumes:
+          - name: train-script
+            configMap:
+              name: ray-train-script
         containers:
           - name: ray-head
             image: rayproject/ray:2.9.3-py310
+            volumeMounts:
+              - name: train-script
+                mountPath: /app/train.py
+                subPath: train.py
+
+            # Pull AWS creds from Secret (local testing)
+            envFrom:
+              - secretRef:
+                  name: aws-creds
+
             env:
               - name: DATA_PATH
                 value: "s3://mas-pipeline-prod/processed/your_dataset/"
-              - name: AWS_DEFAULT_REGION
-                value: "us-west-2"
+              - name: TEXT_COL
+                value: "evidence"
+              - name: LABEL_COL
+                value: "family_id"
+              - name: OUT_DIR
+                value: "/tmp/ray_models"
+              - name: MODEL_NAME
+                value: "router_baseline"
+              - name: NUM_WORKERS
+                value: "2"
+
             ports:
               - containerPort: 6379
                 name: gcs
@@ -27,6 +51,7 @@ spec:
                 name: dashboard
               - containerPort: 10001
                 name: client
+
             resources:
               requests:
                 cpu: "2"
@@ -43,18 +68,40 @@ spec:
       rayStartParams: {}
       template:
         spec:
+          volumes:
+            - name: train-script
+              configMap:
+                name: ray-train-script
           containers:
             - name: ray-worker
               image: rayproject/ray:2.9.3-py310
+              volumeMounts:
+                - name: train-script
+                  mountPath: /app/train.py
+                  subPath: train.py
+
+              envFrom:
+                - secretRef:
+                    name: aws-creds
+
               env:
                 - name: DATA_PATH
                   value: "s3://mas-pipeline-prod/processed/your_dataset/"
-                - name: AWS_DEFAULT_REGION
-                  value: "us-west-2"
+                - name: TEXT_COL
+                  value: "evidence"
+                - name: LABEL_COL
+                  value: "family_id"
+                - name: OUT_DIR
+                  value: "/tmp/ray_models"
+                - name: MODEL_NAME
+                  value: "router_baseline"
+                - name: NUM_WORKERS
+                  value: "2"
+
               resources:
                 requests:
                   cpu: "4"
-                  memory: "8Gi"
+                  memory: "12Gi"
                 limits:
                   cpu: "4"
-                  memory: "8Gi"
+                  memory: "12Gi"
