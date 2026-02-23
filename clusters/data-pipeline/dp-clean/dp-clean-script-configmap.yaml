@@ -10,6 +10,7 @@ data:
     import json
     from pyspark.sql import SparkSession, functions as F, types as T
 
+    # 7 labels
     LABELS = [
         "CrashLoopBackOff",
         "OOMKilled",
@@ -21,6 +22,7 @@ data:
     ]
     label2id = {l: i for i, l in enumerate(LABELS)}
 
+    # Families
     FAMILY_LABELS = ["WorkloadCrash", "ImagePull", "SchedulingNode", "Probes"]
     family2id = {l: i for i, l in enumerate(FAMILY_LABELS)}
 
@@ -96,28 +98,6 @@ data:
             out = "\n".join([x.strip() for x in lines[:min(120, len(lines))] if x.strip()]).strip()
         return out
 
-    def normalize_label(label: str) -> str:
-        if label is None:
-            return None
-        label = str(label).strip()
-
-        # If label is JSON like {"error_type": "..."} or {"error": "..."}
-        if label.startswith("{") and ("error" in label or "error_type" in label):
-            try:
-                obj = json.loads(label)
-                if isinstance(obj, dict):
-                    if "error_type" in obj and obj["error_type"]:
-                        label = str(obj["error_type"]).strip()
-                    elif "error" in obj and obj["error"]:
-                        label = str(obj["error"]).strip()
-            except Exception:
-                pass
-
-        for l in LABELS:
-            if l in label:
-                return l
-        return label
-
     def label_has_required_evidence_strict(label: str, evidence: str) -> bool:
         e = (evidence or "").lower()
 
@@ -144,38 +124,7 @@ data:
 
         return True
 
-    def parse_text_and_label(row: dict):
-        # text candidates
-        for k in ["text", "prompt", "input"]:
-            v = row.get(k)
-            if isinstance(v, str) and v.strip():
-                text = v
-                break
-        else:
-            text = None
-
-        # label candidates
-        label = None
-        for k in ["label", "target", "output", "completion"]:
-            v = row.get(k)
-            if isinstance(v, str) and v.strip():
-                label = v.strip()
-                break
-
-        # chat format
-        if (not text) and isinstance(row.get("messages"), list):
-            user_msgs = [m.get("content","") for m in row["messages"] if isinstance(m, dict) and m.get("role") == "user"]
-            asst_msgs = [m.get("content","") for m in row["messages"] if isinstance(m, dict) and m.get("role") == "assistant"]
-            text = "\n\n".join([u for u in user_msgs if isinstance(u, str)])
-            if asst_msgs:
-                label = str(asst_msgs[-1]).strip()
-
-        if not text or label is None:
-            return None, None
-
-        label = normalize_label(label)
-        return text, label
-
+    # UDF output schema
     out_schema = T.StructType([
         T.StructField("evidence", T.StringType(), True),
         T.StructField("label", T.StringType(), True),
@@ -185,31 +134,68 @@ data:
         T.StructField("drop_reason", T.StringType(), True),
     ])
 
+    def normalize_label(label: str) -> str:
+        if label is None:
+            return None
+        label = str(label).strip()
+
+        # If assistant output is JSON, try extracting error_type/error
+        if label.startswith("{") and ("error" in label or "error_type" in label):
+            try:
+                obj = json.loads(label)
+                if isinstance(obj, dict):
+                    if obj.get("error_type"):
+                        label = str(obj["error_type"]).strip()
+                    elif obj.get("error"):
+                        label = str(obj["error"]).strip()
+            except Exception:
+                pass
+
+        # pick label if contained
+        for l in LABELS:
+            if l in label:
+                return l
+        return label
+
     @F.udf(returnType=out_schema)
-    def clean_udf(text, prompt, input_, label, target, output, completion, messages):
+    def clean_from_messages_udf(messages):
         try:
-            row = {
-                "text": text,
-                "prompt": prompt,
-                "input": input_,
-                "label": label,
-                "target": target,
-                "output": output,
-                "completion": completion,
-                "messages": messages,
-            }
-            t, y = parse_text_and_label(row)
-            if not t or not y:
-                return (None, None, None, None, None, "parse_fail")
-            if y not in label2id:
+            if messages is None:
+                return (None, None, None, None, None, "no_messages")
+
+            # messages is array<struct<role,content>>
+            user_msgs = []
+            asst_msgs = []
+            for m in messages:
+                if m is None:
+                    continue
+                role = m.get("role") if isinstance(m, dict) else None
+                content = m.get("content") if isinstance(m, dict) else None
+                if not isinstance(content, str):
+                    continue
+                if role == "user":
+                    user_msgs.append(content)
+                elif role == "assistant":
+                    asst_msgs.append(content)
+
+            text = "\n\n".join(user_msgs).strip()
+            if not text:
+                return (None, None, None, None, None, "no_user_text")
+
+            if not asst_msgs:
+                return (None, None, None, None, None, "no_assistant_label")
+
+            label = normalize_label(asst_msgs[-1])
+            if label not in label2id:
                 return (None, None, None, None, None, "unknown_label")
 
-            evidence = extract_evidence_window(t)
-            if not label_has_required_evidence_strict(y, evidence):
+            evidence = extract_evidence_window(text)
+            if not label_has_required_evidence_strict(label, evidence):
                 return (None, None, None, None, None, "no_strict_evidence")
 
-            fam = label_to_family(y)
-            return (evidence, y, int(label2id[y]), fam, int(family2id[fam]), None)
+            fam = label_to_family(label)
+            return (evidence, label, int(label2id[label]), fam, int(family2id[fam]), None)
+
         except Exception:
             return (None, None, None, None, None, "exception")
 
@@ -225,22 +211,13 @@ data:
 
         df = spark.read.parquet(args.input)
 
-        # Apply UDF to build training rows
         out = (df
-            .withColumn("cleaned", clean_udf(
-                F.col("text"),
-                F.col("prompt"),
-                F.col("input"),
-                F.col("label"),
-                F.col("target"),
-                F.col("output"),
-                F.col("completion"),
-                F.col("messages"),
-            ))
-            .withColumn("ingest_date", F.current_date())
+            .withColumn("cleaned", clean_from_messages_udf(F.col("messages")))
+            .withColumn("run_date", F.current_date())
             .select(
                 F.col("source_file"),
                 F.col("ingest_date"),
+                F.col("run_date"),
                 F.col("cleaned.evidence").alias("evidence"),
                 F.col("cleaned.label").alias("label"),
                 F.col("cleaned.label_id").alias("label_id"),
@@ -251,16 +228,16 @@ data:
         )
 
         good = out.filter(F.col("drop_reason").isNull()).drop("drop_reason")
-        bad = out.filter(F.col("drop_reason").isNotNull())
+        bad  = out.filter(F.col("drop_reason").isNotNull())
 
         (good.write
             .mode("append")
-            .partitionBy("ingest_date")
+            .partitionBy("run_date")
             .parquet(args.output.rstrip("/")))
 
         (bad.write
             .mode("append")
-            .partitionBy("ingest_date")
+            .partitionBy("run_date")
             .json(args.bad_output.rstrip("/")))
 
         spark.stop()
