@@ -42,7 +42,7 @@ spec:
 
   driver:
     cores: 1
-    memory: "2g"
+    memory: "1g"
     serviceAccount: spark
     env:
       - name: AWS_ACCESS_KEY_ID
