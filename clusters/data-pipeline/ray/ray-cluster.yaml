@@ -31,8 +31,10 @@ spec:
                   name: aws-creds
 
             env:
-              - name: DATA_PATH
-                value: "s3://mas-pipeline-prod/processed/your_dataset/"
+              - name: TRAIN_PATH
+                value: "s3://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict/split=train/run_date=2026-02-23/part-00000-10489509-5521-40ec-a1f0-58cf73e44288.c000.snappy.parquet"
+              - name: VAL_PATH
+                value: "s3://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict/split=val/run_date=2026-02-23/part-00001-10489509-5521-40ec-a1f0-58cf73e44288.c000.snappy.parquet"
               - name: TEXT_COL
                 value: "evidence"
               - name: LABEL_COL

@@ -11,7 +11,6 @@ data:
     import pandas as pd
     import ray
 
-    from sklearn.model_selection import train_test_split
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import Pipeline
@@ -19,23 +18,26 @@ data:
 
     TEXT_COL = os.environ.get("TEXT_COL", "evidence")
     LABEL_COL = os.environ.get("LABEL_COL", "label_id")  # or family_id
-    DATA_PATH = os.environ.get("DATA_PATH")
+
+    TRAIN_PATH = os.environ.get("TRAIN_PATH")
+    VAL_PATH = os.environ.get("VAL_PATH")
+
     OUT_DIR = os.environ.get("OUT_DIR", "/tmp/ray_models")
     MODEL_NAME = os.environ.get("MODEL_NAME", "tfidf_lr")
     NUM_WORKERS = int(os.environ.get("NUM_WORKERS", "2"))
 
+    def _prep(df: pd.DataFrame) -> pd.DataFrame:
+        df = df[[TEXT_COL, LABEL_COL]].dropna()
+        df[TEXT_COL] = df[TEXT_COL].astype(str)
+        return df
+
     @ray.remote
-    def train_on_shard(df_shard: pd.DataFrame, text_col: str, label_col: str):
-        df_shard = df_shard[[text_col, label_col]].dropna()
-        df_shard[text_col] = df_shard[text_col].astype(str)
+    def train_on_shard(train_shard: pd.DataFrame, text_col: str, label_col: str):
+        train_shard = train_shard[[text_col, label_col]].dropna()
+        train_shard[text_col] = train_shard[text_col].astype(str)
 
-        X = df_shard[text_col].values
-        y = df_shard[label_col].values
-
-        strat = y if pd.Series(y).nunique() > 1 else None
-        X_train, X_val, y_train, y_val = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=strat
-        )
+        X_train = train_shard[text_col].values
+        y_train = train_shard[label_col].values
 
         model = Pipeline([
             ("tfidf", TfidfVectorizer(max_features=200_000, ngram_range=(1, 2))),
@@ -43,68 +45,58 @@ data:
         ])
 
         model.fit(X_train, y_train)
-        preds = model.predict(X_val)
-
-        report = classification_report(y_val, preds, output_dict=True)
-
-        return {
-            "accuracy": report["accuracy"],
-            "macro_f1": report["macro avg"]["f1-score"],
-            "n": len(df_shard),
-            "report": report
-        }
+        return model, len(train_shard)
 
     def main():
-        if not DATA_PATH:
-            raise ValueError("DATA_PATH environment variable must be set.")
+        if not TRAIN_PATH:
+            raise ValueError("TRAIN_PATH env var must be set.")
+        if not VAL_PATH:
+            raise ValueError("VAL_PATH env var must be set.")
 
         ray.init(address="auto")
 
-        print("Reading parquet from:", DATA_PATH)
-        df = pd.read_parquet(DATA_PATH)
-        print("Loaded rows:", len(df))
+        print("TRAIN_PATH:", TRAIN_PATH)
+        print("VAL_PATH  :", VAL_PATH)
 
-        # Split dataframe into shards
+        train_df = _prep(pd.read_parquet(TRAIN_PATH))
+        val_df = _prep(pd.read_parquet(VAL_PATH))
+
+        print("Train rows:", len(train_df))
+        print("Val rows  :", len(val_df))
+
+        # Split train into shards, train a model per shard (simple parallelism)
         if NUM_WORKERS <= 1:
-            shards = [df]
+            shards = [train_df]
         else:
-            shards = list(np.array_split(df, NUM_WORKERS))
+            shards = list(np.array_split(train_df, NUM_WORKERS))
 
         futures = [
             train_on_shard.remote(shard, TEXT_COL, LABEL_COL)
             for shard in shards
             if len(shard) > 0
         ]
-
         results = ray.get(futures)
 
-        total = sum(r["n"] for r in results)
-        weighted_acc = sum(r["accuracy"] * r["n"] for r in results) / total
-        weighted_f1 = sum(r["macro_f1"] * r["n"] for r in results) / total
+        # Pick the largest-shard model as "best" (simple heuristic for testing)
+        results_sorted = sorted(results, key=lambda x: x[1], reverse=True)
+        best_model, best_n = results_sorted[0]
+        print("Selected model trained on shard size:", best_n)
+
+        # Evaluate on validation set
+        X_val = val_df[TEXT_COL].values
+        y_val = val_df[LABEL_COL].values
+        preds = best_model.predict(X_val)
+
+        report = classification_report(y_val, preds, output_dict=True)
 
         os.makedirs(OUT_DIR, exist_ok=True)
-
-        output = {
-            "weighted_accuracy": weighted_acc,
-            "weighted_macro_f1": weighted_f1,
-            "shards": [
-                {
-                    "n": r["n"],
-                    "accuracy": r["accuracy"],
-                    "macro_f1": r["macro_f1"]
-                }
-                for r in results
-            ]
-        }
-
         out_path = os.path.join(OUT_DIR, f"{MODEL_NAME}_metrics.json")
-
         with open(out_path, "w") as f:
-            json.dump(output, f, indent=2)
+            json.dump(report, f, indent=2)
 
         print("Saved metrics to:", out_path)
-        print("Weighted accuracy:", weighted_acc)
-        print("Weighted macro_f1:", weighted_f1)
+        print("Val accuracy:", report.get("accuracy"))
+        print("Val macro_f1:", report["macro avg"]["f1-score"])
 
     if __name__ == "__main__":
         main()
