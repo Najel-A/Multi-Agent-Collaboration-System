@@ -1,0 +1,31 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spark-operator-controller
+rules:
+  # Spark jobs create/read Services, Pods, ConfigMaps, Events, etc.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "services", "endpoints", "configmaps", "secrets", "events", "namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # SparkApplication CRD group (adjust if your operator uses a different group)
+  - apiGroups: ["sparkoperator.k8s.io"]
+    resources: ["sparkapplications", "sparkapplications/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spark-operator-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spark-operator-controller
+subjects:
+  - kind: ServiceAccount
+    name: spark-operator-controller
+    namespace: spark-operator
