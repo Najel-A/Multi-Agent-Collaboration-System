@@ -3,18 +3,36 @@ kind: ClusterRole
 metadata:
   name: spark-operator-controller
 rules:
-  # Spark jobs create/read Services, Pods, ConfigMaps, Events, etc.
+  # Core resources the operator watches/creates across namespaces
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "endpoints", "configmaps", "secrets", "events", "namespaces"]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - configmaps
+      - secrets
+      - events
+      - namespaces
+      - serviceaccounts
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
   - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets", "statefulsets"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
-  # SparkApplication CRD group (adjust if your operator uses a different group)
+  # Spark Operator CRDs (this is what your logs are complaining about)
   - apiGroups: ["sparkoperator.k8s.io"]
-    resources: ["sparkapplications", "sparkapplications/status"]
+    resources:
+      - sparkapplications
+      - sparkapplications/status
+      - scheduledsparkapplications
+      - scheduledsparkapplications/status
+      - sparkconnects
+      - sparkconnects/status
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
