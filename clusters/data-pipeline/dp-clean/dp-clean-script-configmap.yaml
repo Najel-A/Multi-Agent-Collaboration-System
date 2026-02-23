@@ -10,7 +10,9 @@ data:
     import json
     from pyspark.sql import SparkSession, functions as F, types as T
 
-    # 7 labels
+    # -----------------------
+    # Labels / Families
+    # -----------------------
     LABELS = [
         "CrashLoopBackOff",
         "OOMKilled",
@@ -22,7 +24,6 @@ data:
     ]
     label2id = {l: i for i, l in enumerate(LABELS)}
 
-    # Families
     FAMILY_LABELS = ["WorkloadCrash", "ImagePull", "SchedulingNode", "Probes"]
     family2id = {l: i for i, l in enumerate(FAMILY_LABELS)}
 
@@ -37,6 +38,9 @@ data:
             return "Probes"
         raise ValueError(lbl)
 
+    # -----------------------
+    # Evidence extraction
+    # -----------------------
     HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 
     EVIDENCE_LINE_RE = re.compile(
@@ -84,6 +88,7 @@ data:
         if events:
             ev_lines = events + ["---"] + ev_lines
 
+        # de-dup preserving order
         seen = set()
         final = []
         for ln in ev_lines:
@@ -94,6 +99,7 @@ data:
         final = final[:max_lines]
         out = "\n".join(final).strip()
 
+        # fallback if extraction too short
         if len(out) < 200:
             out = "\n".join([x.strip() for x in lines[:min(120, len(lines))] if x.strip()]).strip()
         return out
@@ -116,6 +122,7 @@ data:
         if label == "NodeNotReady":
             return ("nodenotready" in e) or ("kubelet" in e and "not ready" in e) or ("node status unknown" in e) or ("node is not ready" in e)
 
+        # STRICT probe separation
         if label == "LivenessProbeFailed":
             return ("liveness probe failed" in e) or ("failed liveness probe" in e)
 
@@ -124,7 +131,9 @@ data:
 
         return True
 
-    # UDF output schema
+    # -----------------------
+    # UDF: strict clean from (text, label_raw)
+    # -----------------------
     out_schema = T.StructType([
         T.StructField("evidence", T.StringType(), True),
         T.StructField("label", T.StringType(), True),
@@ -134,76 +143,65 @@ data:
         T.StructField("drop_reason", T.StringType(), True),
     ])
 
-    def normalize_label(label: str) -> str:
-        if label is None:
+    def normalize_label(label_raw: str) -> str:
+        if label_raw is None:
             return None
-        label = str(label).strip()
+        s = str(label_raw).strip()
 
-        # If assistant output is JSON, try extracting error_type/error
-        if label.startswith("{") and ("error" in label or "error_type" in label):
+        # Assistant sometimes returns JSON. Try to pull error_type / error.
+        if s.startswith("{") and ("error_type" in s or "\"error\"" in s or "error" in s):
             try:
-                obj = json.loads(label)
+                obj = json.loads(s)
                 if isinstance(obj, dict):
                     if obj.get("error_type"):
-                        label = str(obj["error_type"]).strip()
+                        s = str(obj["error_type"]).strip()
                     elif obj.get("error"):
-                        label = str(obj["error"]).strip()
+                        s = str(obj["error"]).strip()
             except Exception:
                 pass
 
-        # pick label if contained
+        # pick label name if contained
         for l in LABELS:
-            if l in label:
+            if l in s:
                 return l
-        return label
+        return s
 
     @F.udf(returnType=out_schema)
-    def clean_from_messages_udf(messages):
+    def clean_strict_udf(text: str, label_raw: str):
         try:
-            if messages is None:
-                return (None, None, None, None, None, "no_messages")
-
-            # messages is array<struct<role,content>>
-            user_msgs = []
-            asst_msgs = []
-            for m in messages:
-                if m is None:
-                    continue
-                role = m.get("role") if isinstance(m, dict) else None
-                content = m.get("content") if isinstance(m, dict) else None
-                if not isinstance(content, str):
-                    continue
-                if role == "user":
-                    user_msgs.append(content)
-                elif role == "assistant":
-                    asst_msgs.append(content)
-
-            text = "\n\n".join(user_msgs).strip()
-            if not text:
+            if text is None or not str(text).strip():
                 return (None, None, None, None, None, "no_user_text")
-
-            if not asst_msgs:
+            if label_raw is None or not str(label_raw).strip():
                 return (None, None, None, None, None, "no_assistant_label")
 
-            label = normalize_label(asst_msgs[-1])
+            label = normalize_label(label_raw)
             if label not in label2id:
                 return (None, None, None, None, None, "unknown_label")
 
-            evidence = extract_evidence_window(text)
+            evidence = extract_evidence_window(str(text))
             if not label_has_required_evidence_strict(label, evidence):
                 return (None, None, None, None, None, "no_strict_evidence")
 
             fam = label_to_family(label)
-            return (evidence, label, int(label2id[label]), fam, int(family2id[fam]), None)
-
+            return (
+                evidence,
+                label,
+                int(label2id[label]),
+                fam,
+                int(family2id[fam]),
+                None
+            )
         except Exception:
             return (None, None, None, None, None, "exception")
 
+    # -----------------------
+    # Main
+    # -----------------------
     def main():
         p = argparse.ArgumentParser()
-        p.add_argument("--input", required=True)
-        p.add_argument("--output", required=True)
-        p.add_argument("--bad_output", required=True)
+        p.add_argument("--input", required=True, help="s3a://.../good/ parquet prefix")
+        p.add_argument("--output", required=True, help="s3a://.../clean_strict/ parquet output")
+        p.add_argument("--bad_output", required=True, help="s3a://.../clean_strict_bad/ json output")
         args = p.parse_args()
 
         spark = SparkSession.builder.appName("dp-clean-strict").getOrCreate()
@@ -211,8 +209,17 @@ data:
 
         df = spark.read.parquet(args.input)
 
+        # Spark-native extraction from array<struct<role,content>>
+        user_text = F.concat_ws(
+            "\n\n",
+            F.expr("transform(filter(messages, x -> x.role = 'user'), x -> x.content)")
+        )
+        label_raw = F.expr("element_at(transform(filter(messages, x -> x.role = 'assistant'), x -> x.content), -1)")
+
         out = (df
-            .withColumn("cleaned", clean_from_messages_udf(F.col("messages")))
+            .withColumn("text_extracted", user_text)
+            .withColumn("label_extracted", label_raw)
+            .withColumn("cleaned", clean_strict_udf(F.col("text_extracted"), F.col("label_extracted")))
             .withColumn("run_date", F.current_date())
             .select(
                 F.col("source_file"),
