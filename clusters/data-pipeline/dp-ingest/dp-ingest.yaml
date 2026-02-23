@@ -10,10 +10,8 @@ spec:
   image: spark:3.5.1-python3
   imagePullPolicy: IfNotPresent
 
-  # ✅ must match the file you mount from the ConfigMap
   mainApplicationFile: local:///opt/spark/app/jsonl_to_parquet.py
 
-  # ✅ must match your script args
   arguments:
     - "--input"
     - "s3a://mas-pipeline-prod/spark_data_processing/ingest_data/unclean_data/"
@@ -33,7 +31,6 @@ spec:
     "spark.hadoop.fs.s3a.fast.upload": "true"
     "spark.hadoop.fs.s3a.connection.maximum": "200"
 
-  # ✅ batch job should exit; later your CronJob can re-run it
   restartPolicy:
     type: Never
 

@@ -10,28 +10,46 @@ data:
 
     def main():
         p = argparse.ArgumentParser()
-        p.add_argument("--input", required=True, help="s3a://bucket/prefix/ with jsonl")
-        p.add_argument("--output", required=True, help="s3a://bucket/prefix/ for parquet")
+        p.add_argument("--input", required=True, help="s3a://bucket/prefix/ with jsonl under train/val/test")
+        p.add_argument("--output", required=True, help="s3a://bucket/prefix/ for parquet outputs")
         args = p.parse_args()
 
         spark = SparkSession.builder.appName("ingest-jsonl-to-parquet").getOrCreate()
         spark.sparkContext.setLogLevel("WARN")
 
-        # JSONL = one JSON object per line
-        # NOTE: We avoid _corrupt_record because it may not be created reliably.
+        # Read all json/jsonl under prefix (Spark JSON reader handles JSONL fine)
         df = (spark.read
               .format("json")
               .option("multiLine", "false")
-              .load(args.input))
+              .load(args.input.rstrip("/") + "/**"))
 
+        # Add metadata
         df = (df
               .withColumn("ingest_date", F.current_date())
               .withColumn("source_file", F.input_file_name()))
 
+        # Detect split from the folder name in the path
+        # Expecting .../unclean_data/train/... or .../val/... or .../test/...
+        sf = F.lower(F.col("source_file"))
+        df = df.withColumn(
+            "split",
+            F.when(sf.contains("/train/"), F.lit("train"))
+             .when(sf.contains("/val/"),   F.lit("val"))
+             .when(sf.contains("/valid/"), F.lit("val"))
+             .when(sf.contains("/test/"),  F.lit("test"))
+             .otherwise(F.lit("unknown"))
+        )
+
+        # Optional: drop unknown split rows (recommended so mistakes don’t pollute data)
+        df = df.filter(F.col("split") != "unknown")
+
+        out_base = args.output.rstrip("/") + "/good"
+
+        # Write parquet partitioned by split + ingest_date
         (df.write
            .mode("append")
-           .partitionBy("ingest_date")
-           .parquet(args.output.rstrip("/") + "/good"))
+           .partitionBy("split", "ingest_date")
+           .parquet(out_base))
 
         spark.stop()
 
