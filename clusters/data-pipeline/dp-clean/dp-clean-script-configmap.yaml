@@ -88,7 +88,6 @@ data:
         if events:
             ev_lines = events + ["---"] + ev_lines
 
-        # de-dup preserving order
         seen = set()
         final = []
         for ln in ev_lines:
@@ -99,7 +98,6 @@ data:
         final = final[:max_lines]
         out = "\n".join(final).strip()
 
-        # fallback if extraction too short
         if len(out) < 200:
             out = "\n".join([x.strip() for x in lines[:min(120, len(lines))] if x.strip()]).strip()
         return out
@@ -122,7 +120,6 @@ data:
         if label == "NodeNotReady":
             return ("nodenotready" in e) or ("kubelet" in e and "not ready" in e) or ("node status unknown" in e) or ("node is not ready" in e)
 
-        # STRICT probe separation
         if label == "LivenessProbeFailed":
             return ("liveness probe failed" in e) or ("failed liveness probe" in e)
 
@@ -132,7 +129,7 @@ data:
         return True
 
     # -----------------------
-    # UDF: strict clean from (text, label_raw)
+    # UDF output schema
     # -----------------------
     out_schema = T.StructType([
         T.StructField("evidence", T.StringType(), True),
@@ -148,7 +145,6 @@ data:
             return None
         s = str(label_raw).strip()
 
-        # Assistant sometimes returns JSON. Try to pull error_type / error.
         if s.startswith("{") and ("error_type" in s or "\"error\"" in s or "error" in s):
             try:
                 obj = json.loads(s)
@@ -160,7 +156,6 @@ data:
             except Exception:
                 pass
 
-        # pick label name if contained
         for l in LABELS:
             if l in s:
                 return l
@@ -199,7 +194,7 @@ data:
     # -----------------------
     def main():
         p = argparse.ArgumentParser()
-        p.add_argument("--input", required=True, help="s3a://.../good/ parquet prefix")
+        p.add_argument("--input", required=True, help="s3a://.../good/ parquet prefix (contains split=...)")
         p.add_argument("--output", required=True, help="s3a://.../clean_strict/ parquet output")
         p.add_argument("--bad_output", required=True, help="s3a://.../clean_strict_bad/ json output")
         args = p.parse_args()
@@ -208,6 +203,19 @@ data:
         spark.sparkContext.setLogLevel("WARN")
 
         df = spark.read.parquet(args.input)
+
+        # Ensure split exists (it should, since ingest partitions by split)
+        if "split" not in df.columns:
+            # fallback: infer from source_file if needed
+            sf = F.lower(F.col("source_file"))
+            df = df.withColumn(
+                "split",
+                F.when(sf.contains("/train/"), F.lit("train"))
+                 .when(sf.contains("/val/"),   F.lit("val"))
+                 .when(sf.contains("/valid/"), F.lit("val"))
+                 .when(sf.contains("/test/"),  F.lit("test"))
+                 .otherwise(F.lit("unknown"))
+            )
 
         # Spark-native extraction from array<struct<role,content>>
         user_text = F.concat_ws(
@@ -222,6 +230,7 @@ data:
             .withColumn("cleaned", clean_strict_udf(F.col("text_extracted"), F.col("label_extracted")))
             .withColumn("run_date", F.current_date())
             .select(
+                F.col("split"),
                 F.col("source_file"),
                 F.col("ingest_date"),
                 F.col("run_date"),
@@ -237,14 +246,15 @@ data:
         good = out.filter(F.col("drop_reason").isNull()).drop("drop_reason")
         bad  = out.filter(F.col("drop_reason").isNotNull())
 
+        # Partition outputs by split so you keep train/val/test separation
         (good.write
             .mode("append")
-            .partitionBy("run_date")
+            .partitionBy("split", "run_date")
             .parquet(args.output.rstrip("/")))
 
         (bad.write
             .mode("append")
-            .partitionBy("run_date")
+            .partitionBy("split", "run_date")
             .json(args.bad_output.rstrip("/")))
 
         spark.stop()
