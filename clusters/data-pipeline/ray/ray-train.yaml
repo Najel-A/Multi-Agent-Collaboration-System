@@ -7,11 +7,9 @@ data:
   train.py: |
     import os
     import json
+    import numpy as np
     import pandas as pd
     import ray
-    from ray import train
-    from ray.train import ScalingConfig
-    from ray.train.sklearn import SklearnTrainer
 
     from sklearn.model_selection import train_test_split
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -21,20 +19,18 @@ data:
 
     TEXT_COL = os.environ.get("TEXT_COL", "evidence")
     LABEL_COL = os.environ.get("LABEL_COL", "label_id")  # or family_id
-    DATA_PATH = os.environ.get("DATA_PATH")  # s3://... or local parquet file/folder
+    DATA_PATH = os.environ.get("DATA_PATH")
     OUT_DIR = os.environ.get("OUT_DIR", "/tmp/ray_models")
     MODEL_NAME = os.environ.get("MODEL_NAME", "tfidf_lr")
+    NUM_WORKERS = int(os.environ.get("NUM_WORKERS", "2"))
 
-    def load_df(path: str) -> pd.DataFrame:
-        return pd.read_parquet(path)
+    @ray.remote
+    def train_on_shard(df_shard: pd.DataFrame, text_col: str, label_col: str):
+        df_shard = df_shard[[text_col, label_col]].dropna()
+        df_shard[text_col] = df_shard[text_col].astype(str)
 
-    def train_loop(config):
-        df = load_df(config["data_path"])
-        df = df[[config["text_col"], config["label_col"]]].dropna()
-        df[config["text_col"]] = df[config["text_col"]].astype(str)
-
-        X = df[config["text_col"]].values
-        y = df[config["label_col"]].values
+        X = df_shard[text_col].values
+        y = df_shard[label_col].values
 
         strat = y if pd.Series(y).nunique() > 1 else None
         X_train, X_val, y_train, y_val = train_test_split(
@@ -42,7 +38,7 @@ data:
         )
 
         model = Pipeline([
-            ("tfidf", TfidfVectorizer(max_features=200_000, ngram_range=(1,2))),
+            ("tfidf", TfidfVectorizer(max_features=200_000, ngram_range=(1, 2))),
             ("clf", LogisticRegression(max_iter=300, n_jobs=1)),
         ])
 
@@ -50,42 +46,65 @@ data:
         preds = model.predict(X_val)
 
         report = classification_report(y_val, preds, output_dict=True)
-        f1_macro = report["macro avg"]["f1-score"]
-        acc = report["accuracy"]
 
-        train.report({"val_f1_macro": f1_macro, "val_accuracy": acc})
-
-        # Save metrics only once (rank 0)
-        if train.get_context().get_world_rank() == 0:
-            os.makedirs(config["out_dir"], exist_ok=True)
-            out_path = os.path.join(config["out_dir"], f"{config['model_name']}_metrics.json")
-            with open(out_path, "w") as f:
-                json.dump(report, f, indent=2)
-            print("Saved metrics to:", out_path)
+        return {
+            "accuracy": report["accuracy"],
+            "macro_f1": report["macro avg"]["f1-score"],
+            "n": len(df_shard),
+            "report": report
+        }
 
     def main():
         if not DATA_PATH:
-            raise ValueError("DATA_PATH env var is required (e.g., s3://bucket/path/ or local parquet).")
+            raise ValueError("DATA_PATH environment variable must be set.")
 
         ray.init(address="auto")
 
-        trainer = SklearnTrainer(
-            train_loop_per_worker=train_loop,
-            scaling_config=ScalingConfig(
-                num_workers=int(os.environ.get("NUM_WORKERS", "2")),
-                use_gpu=False,
-            ),
-            train_loop_config={
-                "data_path": DATA_PATH,
-                "text_col": TEXT_COL,
-                "label_col": LABEL_COL,
-                "out_dir": OUT_DIR,
-                "model_name": MODEL_NAME,
-            },
-        )
+        print("Reading parquet from:", DATA_PATH)
+        df = pd.read_parquet(DATA_PATH)
+        print("Loaded rows:", len(df))
 
-        result = trainer.fit()
-        print("Ray metrics:", result.metrics)
+        # Split dataframe into shards
+        if NUM_WORKERS <= 1:
+            shards = [df]
+        else:
+            shards = list(np.array_split(df, NUM_WORKERS))
+
+        futures = [
+            train_on_shard.remote(shard, TEXT_COL, LABEL_COL)
+            for shard in shards
+            if len(shard) > 0
+        ]
+
+        results = ray.get(futures)
+
+        total = sum(r["n"] for r in results)
+        weighted_acc = sum(r["accuracy"] * r["n"] for r in results) / total
+        weighted_f1 = sum(r["macro_f1"] * r["n"] for r in results) / total
+
+        os.makedirs(OUT_DIR, exist_ok=True)
+
+        output = {
+            "weighted_accuracy": weighted_acc,
+            "weighted_macro_f1": weighted_f1,
+            "shards": [
+                {
+                    "n": r["n"],
+                    "accuracy": r["accuracy"],
+                    "macro_f1": r["macro_f1"]
+                }
+                for r in results
+            ]
+        }
+
+        out_path = os.path.join(OUT_DIR, f"{MODEL_NAME}_metrics.json")
+
+        with open(out_path, "w") as f:
+            json.dump(output, f, indent=2)
+
+        print("Saved metrics to:", out_path)
+        print("Weighted accuracy:", weighted_acc)
+        print("Weighted macro_f1:", weighted_f1)
 
     if __name__ == "__main__":
         main()
