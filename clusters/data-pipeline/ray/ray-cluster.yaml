@@ -1,116 +1,116 @@
-# apiVersion: ray.io/v1
-# kind: RayCluster
-# metadata:
-#   name: ray-cluster
-#   namespace: ray
-#   labels:
-#     ray.io/cluster: ray-cluster
-# spec:
-#   rayVersion: "2.9.3"
+apiVersion: ray.io/v1
+kind: RayCluster
+metadata:
+  name: ray-cluster
+  namespace: ray
+  labels:
+    ray.io/cluster: ray-cluster
+spec:
+  rayVersion: "2.9.3"
 
-#   headGroupSpec:
-#     rayStartParams:
-#       dashboard-host: "0.0.0.0"
-#     template:
-#       spec:
-#         volumes:
-#           - name: train-script
-#             configMap:
-#               name: ray-train-script
-#         containers:
-#           - name: ray-head
-#             image: rayproject/ray:2.9.3-py310
-#             volumeMounts:
-#               - name: train-script
-#                 mountPath: /app/train.py
-#                 subPath: train.py
+  headGroupSpec:
+    rayStartParams:
+      dashboard-host: "0.0.0.0"
+    template:
+      spec:
+        volumes:
+          - name: train-script
+            configMap:
+              name: ray-train-script
+        containers:
+          - name: ray-head
+            image: rayproject/ray:2.9.3-py310
+            volumeMounts:
+              - name: train-script
+                mountPath: /app/train.py
+                subPath: train.py
 
-#             # Pull AWS creds from Secret (local testing)
-#             envFrom:
-#               - secretRef:
-#                   name: aws-creds
+            # Pull AWS creds from Secret (local testing)
+            envFrom:
+              - secretRef:
+                  name: aws-creds
 
-#             env:
-#               - name: TRAIN_PATH
-#                 value: "s3://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict/split=train/run_date=2026-02-23/part-00000-10489509-5521-40ec-a1f0-58cf73e44288.c000.snappy.parquet"
-#               - name: VAL_PATH
-#                 value: "s3://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict/split=val/run_date=2026-02-23/part-00001-10489509-5521-40ec-a1f0-58cf73e44288.c000.snappy.parquet"
-#               - name: TEXT_COL
-#                 value: "evidence"
-#               - name: LABEL_COL
-#                 value: "family_id"
-#               - name: OUT_DIR
-#                 value: "/tmp/ray_models"
-#               - name: MODEL_NAME
-#                 value: "router_baseline"
-#               - name: NUM_WORKERS
-#                 value: "2"
-#               - name: USE_QWEN_4BIT
-#                 value: "0"
-#               - name: CPU_FALLBACK_MODEL
-#                 value: "distilbert-base-uncased"
-#               # - name: USE_QWEN_4BIT
-#               #   value: "1"
-#               # - name: QWEN_MODEL_NAME
-#               #   value: "Qwen/Qwen2.5-7B-Instruct"
-#             ports:
-#               - containerPort: 6379
-#                 name: gcs
-#               - containerPort: 8265
-#                 name: dashboard
-#               - containerPort: 10001
-#                 name: client
+            env:
+              - name: TRAIN_PATH
+                value: "s3://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict/split=train/run_date=2026-02-23/part-00000-10489509-5521-40ec-a1f0-58cf73e44288.c000.snappy.parquet"
+              - name: VAL_PATH
+                value: "s3://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict/split=val/run_date=2026-02-23/part-00001-10489509-5521-40ec-a1f0-58cf73e44288.c000.snappy.parquet"
+              - name: TEXT_COL
+                value: "evidence"
+              - name: LABEL_COL
+                value: "family_id"
+              - name: OUT_DIR
+                value: "/tmp/ray_models"
+              - name: MODEL_NAME
+                value: "router_baseline"
+              - name: NUM_WORKERS
+                value: "2"
+              - name: USE_QWEN_4BIT
+                value: "0"
+              - name: CPU_FALLBACK_MODEL
+                value: "distilbert-base-uncased"
+              # - name: USE_QWEN_4BIT
+              #   value: "1"
+              # - name: QWEN_MODEL_NAME
+              #   value: "Qwen/Qwen2.5-7B-Instruct"
+            ports:
+              - containerPort: 6379
+                name: gcs
+              - containerPort: 8265
+                name: dashboard
+              - containerPort: 10001
+                name: client
 
-#             resources:
-#               requests:
-#                 cpu: "2"
-#                 memory: "4Gi"
-#               limits:
-#                 cpu: "2"
-#                 memory: "4Gi"
+            resources:
+              requests:
+                cpu: "2"
+                memory: "4Gi"
+              limits:
+                cpu: "2"
+                memory: "4Gi"
 
-#   workerGroupSpecs:
-#     - groupName: cpu-workers
-#       replicas: 2
-#       minReplicas: 0
-#       maxReplicas: 10
-#       rayStartParams: {}
-#       template:
-#         spec:
-#           volumes:
-#             - name: train-script
-#               configMap:
-#                 name: ray-train-script
-#           containers:
-#             - name: ray-worker
-#               image: rayproject/ray:2.9.3-py310
-#               volumeMounts:
-#                 - name: train-script
-#                   mountPath: /app/train.py
-#                   subPath: train.py
+  workerGroupSpecs:
+    - groupName: cpu-workers
+      replicas: 2
+      minReplicas: 0
+      maxReplicas: 10
+      rayStartParams: {}
+      template:
+        spec:
+          volumes:
+            - name: train-script
+              configMap:
+                name: ray-train-script
+          containers:
+            - name: ray-worker
+              image: rayproject/ray:2.9.3-py310
+              volumeMounts:
+                - name: train-script
+                  mountPath: /app/train.py
+                  subPath: train.py
 
-#               envFrom:
-#                 - secretRef:
-#                     name: aws-creds
+              envFrom:
+                - secretRef:
+                    name: aws-creds
 
-#               env:
-#                 - name: DATA_PATH
-#                   value: "s3://mas-pipeline-prod/processed/your_dataset/"
-#                 - name: TEXT_COL
-#                   value: "evidence"
-#                 - name: LABEL_COL
-#                   value: "family_id"
-#                 - name: OUT_DIR
-#                   value: "/tmp/ray_models"
-#                 - name: MODEL_NAME
-#                   value: "router_baseline"
-#                 - name: NUM_WORKERS
-#                   value: "2"
+              env:
+                - name: DATA_PATH
+                  value: "s3://mas-pipeline-prod/processed/your_dataset/"
+                - name: TEXT_COL
+                  value: "evidence"
+                - name: LABEL_COL
+                  value: "family_id"
+                - name: OUT_DIR
+                  value: "/tmp/ray_models"
+                - name: MODEL_NAME
+                  value: "router_baseline"
+                - name: NUM_WORKERS
+                  value: "2"
 
-#               resources:
-#                 requests:
-#                   cpu: "4"
-#                   memory: "12Gi"
-#                 limits:
-#                   cpu: "4"
-#                   memory: "12Gi"
+              resources:
+                requests:
+                  cpu: "4"
+                  memory: "12Gi"
+                limits:
+                  cpu: "4"
+                  memory: "12Gi"
