@@ -15,4 +15,4 @@ spec:
       - pandas
       - pyarrow
       - s3fs
-      - scikit-learn
+      - scikit-learn==1.3.2
