@@ -381,32 +381,62 @@ def render_events_table(event_rows):
         lines.append(f"{r['last_seen']}\t{r['type']}\t{r['reason']}\t{r['object']}\t{r['message']}")
     return "\n".join(lines).rstrip() + "\n"
 
-def render_describe_pod(world, pod_name, reason, restarts, events_table, last_state="Terminated", exit_code=1, message=None):
+def render_describe_pod(
+    world,
+    pod_name,
+    pod_phase="Running",
+    container_state="Waiting",
+    reason="CrashLoopBackOff",
+    restarts=0,
+    events_table="",
+    last_state=None,
+    exit_code=None,
+    message=None,
+    ready=False,
+    include_node=True,
+):
     ns = world["namespace"]
     w = world["workload"]
-    node = random.choice(world["nodes"])["name"]
     start = now_utc() - timedelta(minutes=random.randint(2, 15))
-    msg = message or "Back-off restarting failed container"
-    return f"""Name:           {pod_name}
-Namespace:      {ns}
-Priority:       0
-Node:           {node}
-Start Time:     {ts(start)}
-Labels:         app={w['name']}
-Status:         Running
-Containers:
-  {w['container']['name']}:
-    Image:      {w['container']['image']}:{w['container']['tag']}
-    State:      Waiting
-      Reason:   {reason}
-      Message:  {msg}
-    Last State: {last_state}
-      Exit Code: {exit_code}
-    Ready:      False
-    Restart Count: {restarts}
-Events:
-{events_table}
-"""
+
+    lines = [
+        f"Name:           {pod_name}",
+        f"Namespace:      {ns}",
+        "Priority:       0",
+    ]
+
+    if include_node:
+        node = random.choice(world["nodes"])["name"]
+        lines.append(f"Node:           {node}")
+
+    lines.extend([
+        f"Start Time:     {ts(start)}",
+        f"Labels:         app={w['name']}",
+        f"Status:         {pod_phase}",
+        "Containers:",
+        f"  {w['container']['name']}:",
+        f"    Image:      {w['container']['image']}:{w['container']['tag']}",
+        f"    State:      {container_state}",
+    ])
+
+    if reason:
+        lines.append(f"      Reason:   {reason}")
+    if message:
+        lines.append(f"      Message:  {message}")
+
+    if last_state:
+        lines.append(f"    Last State: {last_state}")
+        if exit_code is not None:
+            lines.append(f"      Exit Code: {exit_code}")
+
+    lines.extend([
+        f"    Ready:      {'True' if ready else 'False'}",
+        f"    Restart Count: {restarts}",
+        "Events:",
+        events_table.rstrip()
+    ])
+
+    return "\n".join(lines) + "\n"
 
 def render_logs(base: datetime, lines_with_offsets):
     lines = []
@@ -414,7 +444,15 @@ def render_logs(base: datetime, lines_with_offsets):
         lines.append(f"{ts(base + timedelta(seconds=off))} {msg}")
     return "\n".join(lines).rstrip() + "\n"
 
+def waiting_logs_error(world, pod_name, reason):
+    return (
+        f'Error from server (BadRequest): container "{world["workload"]["container"]["name"]}" '
+        f'in pod "{pod_name}" is waiting to start: {reason}\n'
+    )
+
+
 def add_noise_logs(log_txt, base_dt):
+    # use only for real runtime scenarios
     extra = []
     last_off = 25
     for _ in range(choice_weighted([(0, 25), (1, 50), (2, 25)])):
@@ -422,30 +460,189 @@ def add_noise_logs(log_txt, base_dt):
         extra.append((last_off, f"INFO healthcheck ok component={random.choice(['db','cache','http','auth'])}"))
     if not extra:
         return log_txt
+
     lines = log_txt.rstrip().splitlines()
     for off, msg in sorted(extra, key=lambda x: x[0]):
         lines.append(f"{ts(base_dt + timedelta(seconds=off))} {msg}")
     return "\n".join(lines).rstrip() + "\n"
 
+def rollout_restart_cmd(ns, world):
+    w = world["workload"]
+    kind = w.get("kind", "Deployment").lower()
+    name = w["name"]
+
+    kind_map = {
+        "deployment": "deployment",
+        "deploy": "deployment",
+        "statefulset": "statefulset",
+        "sts": "statefulset",
+        "daemonset": "daemonset",
+        "ds": "daemonset",
+        "job": "job",
+    }
+    target_kind = kind_map.get(kind, "deployment")
+    return f"kubectl -n {ns} rollout restart {target_kind}/{name}"
 
 # ---------------------------
 # Validators (lightweight but important)
 # ---------------------------
 
+def infer_failure_phase(sample):
+    obs = sample.get("observations", {})
+    rem = sample.get("remediation", {})
+    fault = sample.get("fault", {})
+
+    signals = " ".join([
+        obs.get("kubectl_get_pods", ""),
+        obs.get("kubectl_describe_pod", ""),
+        obs.get("kubectl_get_events", ""),
+        obs.get("container_logs", ""),
+        rem.get("category", ""),
+        rem.get("diagnosis", ""),
+        fault.get("scenario_id", ""),
+        fault.get("variant", ""),
+    ]).lower()
+
+    if "failedcreate" in signals or "quota" in signals:
+        return "controller"
+    if (
+        "failedscheduling" in signals
+        or "untolerated taint" in signals
+        or "insufficient memory" in signals
+        or "insufficient cpu" in signals
+        or "didn't match pod's node affinity/selector" in signals
+    ):
+        return "scheduling"
+    if (
+        "failedmount" in signals
+        or "persistentvolumeclaim" in signals
+        or "unbound immediate persistentvolumeclaims" in signals
+        or "storageclass" in signals
+    ):
+        return "mount"
+    if "createcontainerconfigerror" in signals or "imagepullbackoff" in signals or "errimagepull" in signals:
+        return "prestart"
+    if "readiness probe failed" in signals or rem.get("category", "").lower() == "notready":
+        return "notready"
+    return "runtime"
+
+
+def pack_sample(world, fault, observations, remediation, meta=None):
+    w = world["workload"]
+
+    sample = {
+        "id": str(uuid.uuid4()),
+        "context": {
+            "cluster_id": world["cluster_id"],
+            "namespace": world["namespace"],
+            "workload_kind": w["kind"],
+            "workload_name": w["name"],
+            "container_name": w["container"]["name"],
+            "image": f"{w['container']['image']}:{w['container']['tag']}",
+        },
+        "world": {
+            "nodes": world["nodes"],
+            "workload_spec": world["workload"],
+            "inventory": world["inventory"],
+        },
+        "fault": fault,
+        "observations": observations,
+        "remediation": remediation,
+        "meta": meta or {
+            "created_at": ts(now_utc()),
+            "difficulty": choice_weighted([("easy", 60), ("medium", 35), ("hard", 5)]),
+            "noise_level": choice_weighted([(0, 25), (1, 50), (2, 25)]),
+        }
+    }
+
+    sample["meta"]["failure_phase"] = infer_failure_phase(sample)
+    return sample
+
+
 def validate_sample(sample):
     obs = sample.get("observations", {})
     rem = sample.get("remediation", {})
-    _ctx = sample.get("context", {})
+    meta = sample.get("meta", {})
 
     if not obs.get("kubectl_get_pods") or not obs.get("kubectl_describe_pod"):
         return False, "missing core signals"
 
-    # evidence rule: diagnosis keyword should appear in signals
     diagnosis = (rem.get("diagnosis") or "").lower()
-    signals_text = (obs.get("kubectl_get_events","") + obs.get("container_logs","") + obs.get("kubectl_describe_pod","")).lower()
-    for kw in ["secret", "configmap", "manifest", "unauthorized", "taint", "toleration", "insufficient", "oom", "storageclass", "pvc", "forbidden", "dns", "probe", "quota", "connection refused"]:
+    signals_text = " ".join([
+        obs.get("kubectl_get_pods", ""),
+        obs.get("kubectl_describe_pod", ""),
+        obs.get("kubectl_get_events", ""),
+        obs.get("container_logs", ""),
+        rem.get("category", ""),
+    ]).lower()
+
+    for kw in [
+        "secret", "configmap", "manifest", "unauthorized", "taint", "toleration",
+        "insufficient", "oom", "storageclass", "pvc", "forbidden", "dns",
+        "probe", "quota", "connection refused"
+    ]:
         if kw in diagnosis and kw not in signals_text:
             return False, f"evidence missing for '{kw}'"
+
+    phase = meta.get("failure_phase", "runtime")
+    logs = (obs.get("container_logs") or "").lower()
+    describe = (obs.get("kubectl_describe_pod") or "").lower()
+    getpods = (obs.get("kubectl_get_pods") or "").lower()
+    events = (obs.get("kubectl_get_events") or "").lower()
+
+    def has_runtime_logs(txt):
+        markers = [
+            "info starting",
+            "warn ",
+            "error invalid",
+            "dial tcp",
+            "forbidden:",
+            "lookup ",
+            "connection refused",
+            "healthcheck ok",
+            "http server started",
+            "readiness returning 503",
+            "killed",
+            "exiting with code",
+        ]
+        return any(m in txt for m in markers)
+
+    if phase == "prestart":
+        if "restart count: 0" not in describe and "restart count: 1" not in describe:
+            return False, "prestart failure should not have high restart count"
+        if has_runtime_logs(logs):
+            return False, "prestart failure should not have app runtime logs"
+
+    if phase == "scheduling":
+        if "\tpending\t" not in getpods and "status:         pending" not in describe:
+            return False, "scheduling failure should be pending"
+        if has_runtime_logs(logs):
+            return False, "scheduling failure should not have runtime logs"
+        if "failedscheduling" not in events:
+            return False, "scheduling failure missing FailedScheduling event"
+
+    if phase == "mount":
+        if "failedmount" not in events and "persistentvolumeclaim" not in signals_text and "unbound immediate persistentvolumeclaims" not in signals_text:
+            return False, "mount failure missing storage evidence"
+        if has_runtime_logs(logs):
+            return False, "mount failure should not have runtime logs"
+
+    if phase == "notready":
+        if "\trunning\t" not in getpods and "status:         running" not in describe:
+            return False, "notready scenario should usually be running"
+        if "ready:      false" not in describe:
+            return False, "notready scenario should show Ready false"
+        if "restart count: 0" not in describe and "restart count: 1" not in describe:
+            return False, "notready scenario should not have high restarts"
+
+    if phase == "controller":
+        if "failedcreate" not in events and "quota" not in signals_text:
+            return False, "controller failure missing create/quota evidence"
+
+    if phase == "runtime":
+        runtime_signal = has_runtime_logs(logs) or "last state: terminated" in describe or "crashloopbackoff" in signals_text
+        if not runtime_signal:
+            return False, "runtime failure missing runtime evidence"
 
     return True, None
 
@@ -458,28 +655,21 @@ def validate_sample(sample):
 # ---------------------------
 
 def scenario_crashloop_missing_secret(world):
-    """
-    SRE-style: confirm failure mode via events/describe, identify exact reference (env var -> secretKeyRef),
-    verify secret absence, suggest least-risk fix (create secret or point to correct one), then rollout.
-    """
     ns = world["namespace"]
     w = world["workload"]
     inv = world["inventory"]
-    base = now_utc()
 
-    # --- pick a secret that is NOT present to ensure scenario is valid ---
     existing = set(inv["secrets_present"])
     pool = ["db-credentials", "payments-db", "api-secrets", "redis-auth", "kafka-sasl", "s3-keys"]
     missing_secret = random.choice([s for s in pool if s not in existing] or ["payments-db"])
     missing_key = random.choice(["TOKEN", "DB_PASSWORD", "PASSWORD", "SASL_PASSWORD"])
 
-    # Workload references a missing secret (the root cause)
     w["env"].append({
         "name": missing_key,
         "valueFrom": {"secretKeyRef": {"name": missing_secret, "key": missing_key}}
     })
 
-    restarts = random.randint(0, 2)  # CreateContainerConfigError often happens before lots of restarts
+    restarts = 0
     pod_name, getpods = render_kubectl_get_pods(
         world,
         status="CreateContainerConfigError",
@@ -488,78 +678,45 @@ def scenario_crashloop_missing_secret(world):
         age=f"{random.randint(1,9)}m"
     )
 
-    # Events and describe: closer to what kubernetes usually emits
-    events_rows = [
-        {
-            "last_seen": "22s",
-            "type": "Warning",
-            "reason": "Failed",
-            "object": f"pod/{pod_name}",
-            "message": f'Error: secret "{missing_secret}" not found'
-        },
-        {
-            "last_seen": "22s",
-            "type": "Warning",
-            "reason": "Failed",
-            "object": f"pod/{pod_name}",
-            "message": f'Error: couldn\'t find key "{missing_key}" in Secret "{missing_secret}"'
-            # NOTE: This line is realistic but technically only happens if secret exists; keep it optional/noisy
-            # You can remove this row if you want strict correctness for "secret not found".
-        } if maybe(0.15) else None,
-    ]
-    events_rows = [r for r in events_rows if r is not None]
+    events_rows = [{
+        "last_seen": "22s",
+        "type": "Warning",
+        "reason": "Failed",
+        "object": f"pod/{pod_name}",
+        "message": f'Error: secret "{missing_secret}" not found'
+    }]
     events = render_events_table(events_rows)
 
-    # Describe pod includes the "Waiting" reason + message
     describe = render_describe_pod(
         world,
         pod_name=pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
         reason="CreateContainerConfigError",
         restarts=restarts,
         events_table=events,
-        message=f'Error: secret "{missing_secret}" not found'
+        last_state=None,
+        exit_code=None,
+        message=f'Error: secret "{missing_secret}" not found',
+        ready=False
     )
 
-    # Logs: in this failure mode, the container often never starts, so logs may be empty/unavailable.
-    # We model that realistically by sometimes returning a kubectl logs error.
-    if maybe(0.65):
-        logs = (
-            f'Error from server (BadRequest): container "{w["container"]["name"]}" in pod "{pod_name}" is waiting to start: '
-            "CreateContainerConfigError\n"
-        )
-    else:
-        logs = render_logs(base, [
-            (0, f"INFO starting {w['name']} version={w['container']['tag']}"),
-            (1, "INFO reading env"),
-            (2, f"ERROR required env var {missing_key} not set"),
-        ])
-        logs = add_noise_logs(logs, base)
+    logs = waiting_logs_error(world, pod_name, "CreateContainerConfigError")
 
-    # --- SRE diagnosis: precise + references evidence ---
     diagnosis = (
         f"Pod is stuck in CreateContainerConfigError because the workload references Secret "
-        f"`{missing_secret}` (key `{missing_key}`) that does not exist in namespace `{ns}` "
-        f"(see events/describe: secret not found)."
+        f"`{missing_secret}` (key `{missing_key}`) that does not exist in namespace `{ns}`."
     )
 
-    # --- SRE plan: verify -> fix -> rollout -> verify, plus least-privilege concerns ---
     fix_plan = [
-        f"Confirm the reference: inspect the workload spec for env/volumes pointing to Secret `{missing_secret}`.",
-        f"Check whether Secret `{missing_secret}` exists in `{ns}` (and whether a similarly-named secret exists that the workload should use).",
-        f"If the secret should exist: create/restore Secret `{missing_secret}` with key `{missing_key}` using the approved secret source (Vault/ExternalSecrets/SealedSecrets/etc.).",
-        f"If the reference is wrong: update the workload to point to the correct existing Secret+key instead of creating a new one.",
-        "Trigger a rollout only after the secret/reference is corrected.",
+        f"Confirm the workload references Secret `{missing_secret}` key `{missing_key}`.",
+        f"Create or restore Secret `{missing_secret}` with key `{missing_key}`, or update the workload to use the correct existing Secret.",
+        "Restart or recreate the workload after correcting the reference.",
         "Verify the pod becomes Ready and events stop reporting secret-not-found."
     ]
 
-    # Structured actions: what an agent could do (still synthetic, but SRE-sequenced)
-    # Avoid always using rollout restart deploy/... because workload kind may not be Deployment.
     workload_ref = f"{w['kind'].lower()}/{w['name']}"
-    restart_cmd = (
-        f"kubectl -n {ns} rollout restart deploy/{w['name']}"
-        if w["kind"] == "Deployment"
-        else f"kubectl -n {ns} rollout restart {workload_ref}"
-    )
+    restart_cmd = rollout_restart_cmd(ns, world) if w["kind"] != "Job" else f"kubectl -n {ns} delete pod {pod_name}"
 
     actions = [
         {"type": "kubectl_get_pods", "cmd": f"kubectl -n {ns} get pods"},
@@ -567,34 +724,23 @@ def scenario_crashloop_missing_secret(world):
         {"type": "kubectl_get_events", "cmd": f"kubectl -n {ns} get events --sort-by=.lastTimestamp"},
         {"type": "kubectl_get_workload", "cmd": f"kubectl -n {ns} get {workload_ref} -o yaml"},
         {"type": "kubectl_check_secret", "cmd": f"kubectl -n {ns} get secret {missing_secret}"},
-        {
-            "type": "kubectl_create_secret",
-            "cmd": f"kubectl -n {ns} create secret generic {missing_secret} --from-literal={missing_key}=REDACTED",
-            "guardrails": [
-                "Prefer ExternalSecrets/SealedSecrets/Vault; do not paste real secrets into shells in prod.",
-                "Validate key name matches exactly."
-            ]
-        },
-        {"type": "kubectl_rollout_restart", "cmd": restart_cmd},
-        {"type": "kubectl_rollout_status", "cmd": f"kubectl -n {ns} rollout status {workload_ref} --timeout=2m"},
-        {"type": "kubectl_verify_ready", "cmd": f"kubectl -n {ns} get pods -l app={w['name']}"},
+        {"type": "kubectl_create_secret", "cmd": f"kubectl -n {ns} create secret generic {missing_secret} --from-literal={missing_key}=REDACTED"},
+        {"type": "kubectl_restart_or_recreate", "cmd": restart_cmd},
     ]
 
     verification = [
-        f"`kubectl -n {ns} get pods` shows the pod(s) Ready (1/1).",
-        f"`kubectl -n {ns} get events` no longer shows secret-not-found for `{missing_secret}`.",
-        "Application health endpoints / SLO signals are stable after rollout."
+        f"`kubectl -n {ns} get pods` shows the pod Ready.",
+        f"`kubectl -n {ns} get events` no longer shows secret-not-found for `{missing_secret}`."
     ]
 
     rollback = [
-        "If creating the secret was incorrect: delete the newly-created Secret and restore the correct one from the approved source of truth.",
-        "If the workload update caused issues: roll back to the last known-good revision (e.g., rollout undo / revert GitOps change)."
+        "Delete the incorrect secret if one was created by mistake and restore the approved source of truth."
     ]
 
     return pack_sample(
         world,
         fault={
-            "scenario_id": "crashloop_missing_secret",
+            "scenario_id": "createcontainerconfigerror_missing_secret",
             "variant": "secret_not_found",
             "fault_params": {"missing_secret": missing_secret, "missing_key": missing_key}
         },
@@ -622,48 +768,87 @@ def scenario_crashloop_bad_configmap_key(world):
     ns = world["namespace"]
     w = world["workload"]
     inv = world["inventory"]
-    base = now_utc()
 
     cm = random.choice(inv["configmaps_present"])
-    bad_key = random.choice(["CONFIG_PATH", "MODE", "FEATURE_X", "LOG_LEVEL"])
-    w["env"].append({"name": bad_key, "valueFrom": {"configMapKeyRef": {"name": cm, "key": bad_key}}})
+    bad_key = f"MISSING_{random.choice(['CONFIG_PATH', 'MODE', 'FEATURE_X', 'LOG_LEVEL'])}"
 
-    restarts = random.randint(2, 10)
-    pod_name, getpods = render_kubectl_get_pods(world, "CreateContainerConfigError", "0/1", restarts, f"{random.randint(1,9)}m")
+    w["env"].append({
+        "name": bad_key,
+        "valueFrom": {
+            "configMapKeyRef": {
+                "name": cm,
+                "key": bad_key
+            }
+        }
+    })
+
+    restarts = 0
+    pod_name, getpods = render_kubectl_get_pods(
+        world, "CreateContainerConfigError", "0/1", restarts, f"{random.randint(1,9)}m"
+    )
+
     events = render_events_table([{
-        "last_seen": "12s", "type": "Warning", "reason": "Failed", "object": f"pod/{pod_name}",
-        "message": f"configmap \"{cm}\" does not contain key \"{bad_key}\""
+        "last_seen": "12s",
+        "type": "Warning",
+        "reason": "Failed",
+        "object": f"pod/{pod_name}",
+        "message": f'Error: configmap "{cm}" does not contain key "{bad_key}"'
     }])
-    describe = render_describe_pod(world, pod_name, "CreateContainerConfigError", restarts, events, message="Error: configmap key missing")
-    logs = render_logs(base, [
-        (0, f"INFO starting {w['name']} version={w['container']['tag']}"),
-        (3, f"ERROR required config key missing: {bad_key} (configmap={cm})"),
-    ])
-    logs = add_noise_logs(logs, base)
 
-    diagnosis = f"Pod cannot start because ConfigMap `{cm}` is missing key `{bad_key}`."
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="CreateContainerConfigError",
+        restarts=restarts,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message=f'Error: configmap "{cm}" does not contain key "{bad_key}"',
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "CreateContainerConfigError")
+
+    diagnosis = f'Pod cannot start because ConfigMap `{cm}` is missing key `{bad_key}`.'
     fix_plan = [
-        f"Add key `{bad_key}` to ConfigMap `{cm}` or update workload to use an existing key.",
-        "Restart/rollout workload.",
-        f"Verify pod becomes Ready in `{ns}`."
+        f'Add key `{bad_key}` to ConfigMap `{cm}` or update the workload to reference an existing key.',
+        "Restart or recreate the workload so a new Pod is created.",
+        f"Verify the Pod becomes Ready in `{ns}`."
     ]
 
     actions = [
-        {"type": "kubectl_edit_configmap", "cmd": f"kubectl -n {ns} edit configmap {cm}  # add key {bad_key}"},
-        {"type": "kubectl_rollout_restart", "cmd": f"kubectl -n {ns} rollout restart deploy/{w['name']}"},
-        {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
+        {"type": "kubectl_get_workload", "cmd": f"kubectl -n {ns} get {w['kind'].lower()}/{w['name']} -o yaml"},
+        {"type": "kubectl_edit_configmap", "cmd": f"kubectl -n {ns} edit configmap {cm}"},
+        {"type": "kubectl_rollout_restart", "cmd": rollout_restart_cmd(ns, world)},
+        {"type": "validate", "cmd": f"kubectl -n {ns} get pods && kubectl -n {ns} get events --sort-by=.lastTimestamp"}
     ]
-    rollback = ["Undo configmap changes; re-apply correct data."]
+
+    rollback = [f"Restore the prior ConfigMap `{cm}` contents and restart again if needed."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "crashloop_bad_configmap_key", "variant": "configmap_key_missing", "fault_params": {"configmap": cm, "missing_key": bad_key}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": False}},
-        remediation={"category": "CreateContainerConfigError", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"Pod Ready in `{ns}`; no configmap-key warnings."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "createcontainerconfigerror_bad_configmap_key",
+            "variant": "configmap_key_missing",
+            "fault_params": {"configmap": cm, "missing_key": bad_key}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": False}
+        },
+        remediation={
+            "category": "CreateContainerConfigError",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"Pod Ready in `{ns}`; no configmap-key warnings remain."],
+            "rollback": rollback
+        }
     )
 
 def scenario_crashloop_bad_args(world):
@@ -676,11 +861,29 @@ def scenario_crashloop_bad_args(world):
 
     restarts = random.randint(2, 12)
     pod_name, getpods = render_kubectl_get_pods(world, "CrashLoopBackOff", "0/1", restarts, f"{random.randint(2,10)}m")
+
     events = render_events_table([{
-        "last_seen": "20s", "type": "Warning", "reason": "BackOff", "object": f"pod/{pod_name}",
+        "last_seen": "20s",
+        "type": "Warning",
+        "reason": "BackOff",
+        "object": f"pod/{pod_name}",
         "message": "Back-off restarting failed container"
     }])
-    describe = render_describe_pod(world, pod_name, "CrashLoopBackOff", restarts, events, exit_code=2, message="Invalid arguments")
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Running",
+        container_state="Waiting",
+        reason="CrashLoopBackOff",
+        restarts=restarts,
+        events_table=events,
+        last_state="Terminated",
+        exit_code=2,
+        message="Back-off restarting failed container",
+        ready=False
+    )
+
     logs = render_logs(base, [
         (0, f"INFO starting {w['name']}"),
         (3, f"ERROR invalid argument: {bad_flag}"),
@@ -688,96 +891,183 @@ def scenario_crashloop_bad_args(world):
     ])
     logs = add_noise_logs(logs, base)
 
-    diagnosis = "Container crashes due to invalid command-line arguments / flags."
+    diagnosis = f"Container starts but exits immediately because the workload passes invalid args (`{bad_flag}`), causing CrashLoopBackOff."
     fix_plan = [
-        "Correct the container args/command to valid values in the workload spec.",
-        "Apply change and rollout restart.",
-        f"Verify pod stabilizes and becomes Ready in `{ns}`."
+        "Correct the container args or command in the workload spec.",
+        "Apply the change and restart the workload.",
+        f"Verify restarts stop increasing and the Pod becomes Ready in `{ns}`."
     ]
 
     actions = [
-        {"type": "kubectl_edit_deploy", "cmd": f"kubectl -n {ns} edit deploy/{w['name']}  # fix args/command"},
+        {"type": "kubectl_get_workload", "cmd": f"kubectl -n {ns} get {w['kind'].lower()}/{w['name']} -o yaml"},
+        {"type": "kubectl_edit_workload", "cmd": f"kubectl -n {ns} edit {w['kind'].lower()}/{w['name']}"},
+        {"type": "kubectl_rollout_restart", "cmd": rollout_restart_cmd(ns, world)},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
     ]
-    rollback = ["Undo args edit if it breaks startup."]
+
+    rollback = ["Undo the args or command change if it breaks startup further."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "crashloop_bad_args", "variant": "invalid_args", "fault_params": {"bad_arg": bad_flag}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": False}},
-        remediation={"category": "CrashLoopBackOff", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": ["Restarts stop increasing; pod Ready."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "crashloop_bad_args",
+            "variant": "invalid_args",
+            "fault_params": {"bad_arg": bad_flag}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": False}
+        },
+        remediation={
+            "category": "CrashLoopBackOff",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": ["Restarts stop increasing; pod Ready."],
+            "rollback": rollback
+        }
     )
 
 def scenario_imagepull_bad_tag(world):
     ns = world["namespace"]
     w = world["workload"]
-    base = now_utc()
 
     good_tag = w["container"]["tag"]
     bad_tag = good_tag + "-typo"
     w["container"]["tag"] = bad_tag
 
     pod_name, getpods = render_kubectl_get_pods(world, "ImagePullBackOff", "0/1", 0, f"{random.randint(1,6)}m")
-    events = render_events_table([
-        {"last_seen": "20s", "type": "Warning", "reason": "Failed", "object": f"pod/{pod_name}",
-         "message": f"Failed to pull image \"{w['container']['image']}:{bad_tag}\": manifest unknown"},
-        {"last_seen": "15s", "type": "Warning", "reason": "BackOff", "object": f"pod/{pod_name}",
-         "message": f"Back-off pulling image \"{w['container']['image']}:{bad_tag}\""}
-    ])
-    describe = render_describe_pod(world, pod_name, "ImagePullBackOff", 0, events, last_state="Waiting", exit_code=0, message="Back-off pulling image")
-    logs = render_logs(base, [(0, "INFO container not started; image pull failed")])
 
-    diagnosis = "Image pull fails because the image tag does not exist (manifest unknown)."
+    events = render_events_table([
+        {
+            "last_seen": "20s",
+            "type": "Warning",
+            "reason": "Failed",
+            "object": f"pod/{pod_name}",
+            "message": f'Failed to pull image "{w["container"]["image"]}:{bad_tag}": manifest unknown'
+        },
+        {
+            "last_seen": "18s",
+            "type": "Warning",
+            "reason": "Failed",
+            "object": f"pod/{pod_name}",
+            "message": f'Error: ErrImagePull'
+        },
+        {
+            "last_seen": "15s",
+            "type": "Warning",
+            "reason": "BackOff",
+            "object": f"pod/{pod_name}",
+            "message": f'Back-off pulling image "{w["container"]["image"]}:{bad_tag}"'
+        }
+    ])
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="ImagePullBackOff",
+        restarts=0,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="Back-off pulling image",
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "ImagePullBackOff")
+
+    diagnosis = f'Pod cannot start because image `{w["container"]["image"]}:{bad_tag}` does not exist in the registry (manifest unknown).'
     fix_plan = [
-        f"Update image tag from `{bad_tag}` to a valid tag (e.g., `{good_tag}`) in the workload spec.",
-        "Apply change and wait for new pod to pull the correct image.",
-        f"Verify pod becomes Ready in `{ns}`."
+        f"Update the image tag from `{bad_tag}` to a valid tag such as `{good_tag}`.",
+        "Apply the change and wait for a new Pod to pull the corrected image.",
+        f"Verify the Pod becomes Ready in `{ns}`."
     ]
 
     actions = [
-        {"type": "kubectl_set_image", "cmd": f"kubectl -n {ns} set image deploy/{w['name']} {w['container']['name']}={w['container']['image']}:{good_tag}"},
-        {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
+        {"type": "kubectl_set_image", "cmd": f"kubectl -n {ns} set image {w['kind'].lower()}/{w['name']} {w['container']['name']}={w['container']['image']}:{good_tag}"},
+        {"type": "validate", "cmd": f"kubectl -n {ns} get pods && kubectl -n {ns} get events --sort-by=.lastTimestamp"}
     ]
-    rollback = ["Set image back to prior tag and validate."]
+
+    rollback = ["Set the image back to the last known good tag if the replacement is wrong."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "imagepull_bad_tag", "variant": "manifest_unknown", "fault_params": {"bad_tag": bad_tag, "good_tag": good_tag}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": 0, "oom_killed": False}},
-        remediation={"category": "ImagePullBackOff", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"Pod Ready in `{ns}`; image pulled successfully."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "imagepull_bad_tag",
+            "variant": "manifest_unknown",
+            "fault_params": {"bad_tag": bad_tag, "good_tag": good_tag}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": 0, "oom_killed": False}
+        },
+        remediation={
+            "category": "ImagePullBackOff",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"Pod Ready in `{ns}`; image pulls successfully."],
+            "rollback": rollback
+        }
     )
 
 def scenario_imagepull_registry_auth(world):
     ns = world["namespace"]
     w = world["workload"]
     inv = world["inventory"]
-    base = now_utc()
 
     w["container"]["image"] = choice_weighted([("ghcr.io/acme/private-api", 60), ("docker.io/acme/private-worker", 40)])
     needed_secret = "registry-creds"
     inv["secrets_present"] = [s for s in inv["secrets_present"] if s != needed_secret]
 
     pod_name, getpods = render_kubectl_get_pods(world, "ImagePullBackOff", "0/1", 0, f"{random.randint(1,6)}m")
-    events = render_events_table([{
-        "last_seen": "25s", "type": "Warning", "reason": "Failed", "object": f"pod/{pod_name}",
-        "message": f"Failed to pull image \"{w['container']['image']}:{w['container']['tag']}\": unauthorized: authentication required"
-    }])
-    describe = render_describe_pod(world, pod_name, "ImagePullBackOff", 0, events, last_state="Waiting", exit_code=0, message="unauthorized: authentication required")
-    logs = render_logs(base, [(0, "INFO container not started; registry auth failed")])
 
-    diagnosis = "Image pull fails due to missing/invalid registry credentials (unauthorized)."
+    events = render_events_table([
+        {
+            "last_seen": "25s",
+            "type": "Warning",
+            "reason": "Failed",
+            "object": f"pod/{pod_name}",
+            "message": f'Failed to pull image "{w["container"]["image"]}:{w["container"]["tag"]}": unauthorized: authentication required'
+        },
+        {
+            "last_seen": "20s",
+            "type": "Warning",
+            "reason": "BackOff",
+            "object": f"pod/{pod_name}",
+            "message": f'Back-off pulling image "{w["container"]["image"]}:{w["container"]["tag"]}"'
+        }
+    ])
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="ImagePullBackOff",
+        restarts=0,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="unauthorized: authentication required",
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "ImagePullBackOff")
+
+    diagnosis = "Image pull fails due to missing or invalid registry credentials (unauthorized)."
     fix_plan = [
-        f"Create imagePullSecret `{needed_secret}` in `{ns}` and reference it from the ServiceAccount or Pod spec.",
-        "Apply change and restart/rollout if needed.",
-        "Verify image pull succeeds and pod becomes Ready."
+        f"Create or repair imagePullSecret `{needed_secret}` in `{ns}`.",
+        "Reference it from the ServiceAccount or Pod spec.",
+        "Recreate or restart the workload and verify the image pull succeeds."
     ]
 
     actions = [
@@ -785,305 +1075,477 @@ def scenario_imagepull_registry_auth(world):
         {"type": "kubectl_patch_sa", "cmd": f"kubectl -n {ns} patch serviceaccount {w['serviceAccountName']} -p '{{\"imagePullSecrets\":[{{\"name\":\"{needed_secret}\"}}]}}'"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
     ]
-    rollback = ["Remove imagePullSecret reference or delete secret."]
+
+    rollback = ["Remove the incorrect imagePullSecret reference or restore the previous working credential."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "imagepull_registry_auth", "variant": "unauthorized", "fault_params": {"secret_needed": needed_secret}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": 0, "oom_killed": False}},
-        remediation={"category": "ImagePullBackOff", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"Pod Ready in `{ns}`; no unauthorized image pull errors."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "imagepull_registry_auth",
+            "variant": "unauthorized",
+            "fault_params": {"secret_needed": needed_secret}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": 0, "oom_killed": False}
+        },
+        remediation={
+            "category": "ImagePullBackOff",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"Pod Ready in `{ns}`; no unauthorized image pull errors remain."],
+            "rollback": rollback
+        }
     )
 
 def scenario_failedscheduling_taint(world):
     ns = world["namespace"]
     w = world["workload"]
-    base = now_utc()
 
     taint_key = "dedicated"
     taint_val = random.choice(["infra", "gpu", "batch"])
     for node in world["nodes"]:
-        if maybe(0.7):
+        node["taints"] = [t for t in node["taints"] if t.get("key") != taint_key]
+        if maybe(0.8):
             node["taints"].append({"key": taint_key, "value": taint_val, "effect": "NoSchedule"})
     w["tolerations"] = []
 
     pod_name, getpods = render_kubectl_get_pods(world, "Pending", "0/1", 0, f"{random.randint(1,10)}m")
+
     events = render_events_table([{
-        "last_seen": "8s", "type": "Warning", "reason": "FailedScheduling", "object": f"pod/{pod_name}",
+        "last_seen": "8s",
+        "type": "Warning",
+        "reason": "FailedScheduling",
+        "object": f"pod/{pod_name}",
         "message": f"0/{len(world['nodes'])} nodes are available: {len(world['nodes'])} node(s) had untolerated taint {{{taint_key}={taint_val}: NoSchedule}}."
     }])
-    describe = render_describe_pod(world, pod_name, "Pending", 0, events, last_state="Waiting", exit_code=0, message="FailedScheduling")
-    logs = render_logs(base, [(0, "INFO pod not scheduled; no container logs")])
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="Pending",
+        restarts=0,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="FailedScheduling",
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "ContainerCreating")
 
     diagnosis = f"Pod cannot schedule due to untolerated taint `{taint_key}={taint_val}:NoSchedule`."
     fix_plan = [
-        f"Add toleration for taint `{taint_key}={taint_val}:NoSchedule` OR adjust taints/nodeSelector strategy.",
-        "Apply change and verify pod schedules.",
-        f"Confirm pod becomes Running/Ready in `{ns}`."
+        f"Add a toleration for `{taint_key}={taint_val}:NoSchedule`, or adjust node placement strategy.",
+        "Apply the workload change and allow the scheduler to place the Pod.",
+        f"Verify the Pod becomes Running and Ready in `{ns}`."
     ]
 
     actions = [
-        {"type": "kubectl_patch_deploy", "cmd": f"kubectl -n {ns} patch deploy/{w['name']} --type merge -p '<tolerations patch>'"},
+        {"type": "kubectl_get_nodes", "cmd": "kubectl get nodes -o json"},
+        {"type": "kubectl_patch_workload", "cmd": f"kubectl -n {ns} patch {w['kind'].lower()}/{w['name']} --type merge -p '<tolerations patch>'"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
     ]
-    rollback = ["Remove toleration patch and redeploy."]
+
+    rollback = ["Remove the toleration if it places the workload on the wrong node pool."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "failedscheduling_taint", "variant": "untolerated_taint", "fault_params": {"taint_key": taint_key, "taint_value": taint_val}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": 0, "oom_killed": False}},
-        remediation={"category": "FailedScheduling", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"Pod scheduled and Running in `{ns}`."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "failedscheduling_taint",
+            "variant": "untolerated_taint",
+            "fault_params": {"taint_key": taint_key, "taint_value": taint_val}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": 0, "oom_killed": False}
+        },
+        remediation={
+            "category": "FailedScheduling",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"Pod scheduled and Running in `{ns}`."],
+            "rollback": rollback
+        }
     )
 
 def scenario_failedscheduling_insufficient_memory(world):
     ns = world["namespace"]
     w = world["workload"]
-    base = now_utc()
 
-    w["container"]["resources"]["requests"]["memory"] = "64Gi"
+    w["container"]["resources"]["requests"]["memory"] = "128Gi"
+
     pod_name, getpods = render_kubectl_get_pods(world, "Pending", "0/1", 0, f"{random.randint(1,10)}m")
+
     events = render_events_table([{
-        "last_seen": "9s", "type": "Warning", "reason": "FailedScheduling", "object": f"pod/{pod_name}",
+        "last_seen": "9s",
+        "type": "Warning",
+        "reason": "FailedScheduling",
+        "object": f"pod/{pod_name}",
         "message": f"0/{len(world['nodes'])} nodes are available: {len(world['nodes'])} Insufficient memory."
     }])
-    describe = render_describe_pod(world, pod_name, "Pending", 0, events, last_state="Waiting", exit_code=0, message="Insufficient memory")
-    logs = render_logs(base, [(0, "INFO pod not scheduled; insufficient node resources")])
 
-    diagnosis = "Pod cannot schedule because its memory request exceeds available node capacity (Insufficient memory)."
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="Pending",
+        restarts=0,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="Insufficient memory",
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "ContainerCreating")
+
+    diagnosis = "Pod cannot schedule because its memory request exceeds the available node capacity (Insufficient memory)."
     new_req = choice_weighted([("256Mi", 15), ("512Mi", 35), ("1Gi", 35), ("2Gi", 15)])
     fix_plan = [
-        f"Reduce memory request to a realistic value (e.g., `{new_req}`) OR add larger nodes.",
-        "Apply change and verify scheduling succeeds.",
-        f"Confirm pod becomes Running/Ready in `{ns}`."
+        f"Reduce the memory request to a realistic value such as `{new_req}`, or add nodes with more memory.",
+        "Apply the resource change and let the scheduler retry placement.",
+        f"Verify the Pod becomes Running and Ready in `{ns}`."
     ]
 
     actions = [
-        {"type": "kubectl_patch_resources", "cmd": f"kubectl -n {ns} patch deploy/{w['name']} --type merge -p '<resources patch>'"},
+        {"type": "kubectl_patch_resources", "cmd": f"kubectl -n {ns} patch {w['kind'].lower()}/{w['name']} --type merge -p '<resources patch>'"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
     ]
-    rollback = ["Restore previous resource values."]
+
+    rollback = ["Restore the original resource request if the reduced memory value is insufficient."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "failedscheduling_insufficient_memory", "variant": "insufficient_memory", "fault_params": {"requested_memory": "64Gi", "suggested_memory": new_req}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": 0, "oom_killed": False}},
-        remediation={"category": "FailedScheduling", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"Pod scheduled and Running in `{ns}`."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "failedscheduling_insufficient_memory",
+            "variant": "insufficient_memory",
+            "fault_params": {"requested_memory": "128Gi", "suggested_memory": new_req}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": 0, "oom_killed": False}
+        },
+        remediation={
+            "category": "FailedScheduling",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"Pod scheduled and Running in `{ns}`."],
+            "rollback": rollback
+        }
     )
 
 def scenario_failedscheduling_insufficient_cpu(world):
     ns = world["namespace"]
     w = world["workload"]
-    base = now_utc()
 
     w["container"]["resources"]["requests"]["cpu"] = "32"
+
     pod_name, getpods = render_kubectl_get_pods(world, "Pending", "0/1", 0, f"{random.randint(1,10)}m")
+
     events = render_events_table([{
-        "last_seen": "11s", "type": "Warning", "reason": "FailedScheduling", "object": f"pod/{pod_name}",
+        "last_seen": "11s",
+        "type": "Warning",
+        "reason": "FailedScheduling",
+        "object": f"pod/{pod_name}",
         "message": f"0/{len(world['nodes'])} nodes are available: {len(world['nodes'])} Insufficient cpu."
     }])
-    describe = render_describe_pod(world, pod_name, "Pending", 0, events, last_state="Waiting", exit_code=0, message="Insufficient cpu")
-    logs = render_logs(base, [(0, "INFO pod not scheduled; insufficient CPU")])
 
-    diagnosis = "Pod cannot schedule because its CPU request exceeds available node capacity (Insufficient cpu)."
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="Pending",
+        restarts=0,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="Insufficient cpu",
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "ContainerCreating")
+
+    diagnosis = "Pod cannot schedule because its CPU request exceeds the available node capacity (Insufficient cpu)."
     new_req = choice_weighted([("200m", 20), ("500m", 40), ("1", 30), ("2", 10)])
     fix_plan = [
-        f"Reduce CPU request to a realistic value (e.g., `{new_req}`) OR add nodes with more CPU.",
-        "Apply change and verify scheduling succeeds.",
-        f"Confirm pod becomes Running/Ready in `{ns}`."
+        f"Reduce the CPU request to a realistic value such as `{new_req}`, or add nodes with more CPU.",
+        "Apply the resource change and let the scheduler retry placement.",
+        f"Verify the Pod becomes Running and Ready in `{ns}`."
     ]
 
     actions = [
-        {"type": "kubectl_patch_resources", "cmd": f"kubectl -n {ns} patch deploy/{w['name']} --type merge -p '<resources patch>'"},
+        {"type": "kubectl_patch_resources", "cmd": f"kubectl -n {ns} patch {w['kind'].lower()}/{w['name']} --type merge -p '<resources patch>'"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
     ]
-    rollback = ["Restore previous resource values."]
+
+    rollback = ["Restore the original CPU request if the reduced value is incorrect."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "failedscheduling_insufficient_cpu", "variant": "insufficient_cpu", "fault_params": {"requested_cpu": "32", "suggested_cpu": new_req}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": 0, "oom_killed": False}},
-        remediation={"category": "FailedScheduling", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"Pod scheduled and Running in `{ns}`."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "failedscheduling_insufficient_cpu",
+            "variant": "insufficient_cpu",
+            "fault_params": {"requested_cpu": "32", "suggested_cpu": new_req}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": 0, "oom_killed": False}
+        },
+        remediation={
+            "category": "FailedScheduling",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"Pod scheduled and Running in `{ns}`."],
+            "rollback": rollback
+        }
     )
 
 def scenario_nodeselector_mismatch(world):
     ns = world["namespace"]
     w = world["workload"]
-    base = now_utc()
 
-    # force selector that no node has
     w["nodeSelector"] = {"kubernetes.io/arch": "riscv64"}
 
     pod_name, getpods = render_kubectl_get_pods(world, "Pending", "0/1", 0, f"{random.randint(1,10)}m")
+
     events = render_events_table([{
-        "last_seen": "9s", "type": "Warning", "reason": "FailedScheduling", "object": f"pod/{pod_name}",
+        "last_seen": "9s",
+        "type": "Warning",
+        "reason": "FailedScheduling",
+        "object": f"pod/{pod_name}",
         "message": f"0/{len(world['nodes'])} nodes are available: {len(world['nodes'])} node(s) didn't match Pod's node affinity/selector."
     }])
-    describe = render_describe_pod(world, pod_name, "Pending", 0, events, last_state="Waiting", exit_code=0, message="nodeSelector mismatch")
-    logs = render_logs(base, [(0, "INFO pod not scheduled; nodeSelector mismatch")])
 
-    diagnosis = "Pod cannot schedule because nodeSelector/affinity does not match any nodes."
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="Pending",
+        restarts=0,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="nodeSelector mismatch",
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "ContainerCreating")
+
+    diagnosis = "Pod cannot schedule because its nodeSelector or affinity does not match any nodes."
     fix_plan = [
-        "Remove or correct nodeSelector/affinity so it matches real node labels.",
-        "Apply change and verify pod schedules.",
-        f"Confirm pod becomes Running/Ready in `{ns}`."
+        "Remove or correct the nodeSelector or node affinity so it matches real node labels.",
+        "Apply the change and allow the scheduler to place the Pod.",
+        f"Verify the Pod becomes Running and Ready in `{ns}`."
     ]
 
     actions = [
-        {"type": "kubectl_edit_deploy", "cmd": f"kubectl -n {ns} edit deploy/{w['name']}  # fix nodeSelector"},
+        {"type": "kubectl_get_nodes", "cmd": "kubectl get nodes --show-labels"},
+        {"type": "kubectl_edit_workload", "cmd": f"kubectl -n {ns} edit {w['kind'].lower()}/{w['name']}"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
     ]
-    rollback = ["Undo selector edit if it was needed for placement."]
+
+    rollback = ["Restore the previous selector or affinity if it was required for correct placement."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "nodeselector_mismatch", "variant": "no_matching_nodes", "fault_params": {"nodeSelector": w["nodeSelector"]}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": 0, "oom_killed": False}},
-        remediation={"category": "FailedScheduling", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"Pod scheduled and Running in `{ns}`."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "nodeselector_mismatch",
+            "variant": "no_matching_nodes",
+            "fault_params": {"nodeSelector": w["nodeSelector"]}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": 0, "oom_killed": False}
+        },
+        remediation={
+            "category": "FailedScheduling",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"Pod scheduled and Running in `{ns}`."],
+            "rollback": rollback
+        }
     )
 
 def scenario_pvc_pending_missing_storageclass(world):
     ns = world["namespace"]
     w = world["workload"]
-    base = now_utc()
 
     world["inventory"]["storageclasses_present"] = []
     pvc_name = random.choice(["data", "uploads", "cache", "model-checkpoints"])
     w["volumes"].append({"name": pvc_name, "persistentVolumeClaim": {"claimName": pvc_name}})
 
     pod_name, getpods = render_kubectl_get_pods(world, "Pending", "0/1", 0, f"{random.randint(1,12)}m")
-    events = render_events_table([{
-        "last_seen": "18s", "type": "Warning", "reason": "FailedScheduling", "object": f"pod/{pod_name}",
-        "message": "pod has unbound immediate PersistentVolumeClaims"
-    }])
-    describe = render_describe_pod(world, pod_name, "Pending", 0, events, last_state="Waiting", exit_code=0, message="Unbound PVC")
-    logs = render_logs(base, [(0, "INFO pod waiting for PVC binding")])
 
-    diagnosis = "Pod is Pending because PVC is unbound (missing/invalid StorageClass or no PV available)."
+    events = render_events_table([
+        {
+            "last_seen": "18s",
+            "type": "Warning",
+            "reason": "FailedScheduling",
+            "object": f"pod/{pod_name}",
+            "message": "pod has unbound immediate PersistentVolumeClaims"
+        },
+        {
+            "last_seen": "17s",
+            "type": "Warning",
+            "reason": "ProvisioningFailed",
+            "object": f"persistentvolumeclaim/{pvc_name}",
+            "message": 'storageclass.storage.k8s.io "standard" not found'
+        }
+    ])
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="Pending",
+        restarts=0,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="Unbound PVC",
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "ContainerCreating")
+
+    diagnosis = f"Pod is Pending because PVC `{pvc_name}` is unbound; no valid StorageClass is available to provision storage."
     fix_plan = [
-        "Ensure a valid StorageClass exists (e.g., `standard`) and PVC references it, or provision a suitable PV.",
-        "Apply changes and verify PVC becomes Bound.",
-        f"Confirm pod becomes Running/Ready in `{ns}`."
+        "Ensure a valid StorageClass exists and the PVC references it correctly, or provision a matching PV.",
+        f"Verify PVC `{pvc_name}` becomes Bound.",
+        f"Confirm the Pod becomes Running and Ready in `{ns}`."
     ]
 
     actions = [
+        {"type": "kubectl_get_storageclass", "cmd": "kubectl get storageclass"},
+        {"type": "kubectl_get_pvc", "cmd": f"kubectl -n {ns} get pvc {pvc_name}"},
         {"type": "kubectl_patch_pvc", "cmd": f"kubectl -n {ns} patch pvc {pvc_name} -p '{{\"spec\":{{\"storageClassName\":\"standard\"}}}}'"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pvc && kubectl -n {ns} get pods"}
     ]
-    rollback = ["Undo PVC patch if incorrect."]
+
+    rollback = ["Undo the PVC storageClass change if it points to the wrong class."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "pvc_pending_missing_storageclass", "variant": "unbound_pvc", "fault_params": {"pvc": pvc_name}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": 0, "oom_killed": False}},
-        remediation={"category": "Pending", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"PVC Bound; pod Running/Ready in `{ns}`."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "pvc_pending_missing_storageclass",
+            "variant": "unbound_pvc_missing_storageclass",
+            "fault_params": {"pvc": pvc_name}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": 0, "oom_killed": False}
+        },
+        remediation={
+            "category": "Pending",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"PVC `{pvc_name}` Bound; pod Running and Ready in `{ns}`."],
+            "rollback": rollback
+        }
     )
 
 def scenario_pvc_not_found_mountfail(world):
     ns = world["namespace"]
     w = world["workload"]
-    base = now_utc()
 
     pvc_name = rand_name("missing-pvc", 4)
     w["volumes"].append({"name": "data", "persistentVolumeClaim": {"claimName": pvc_name}})
 
-    restarts = random.randint(0, 3)
+    restarts = 0
     pod_name, getpods = render_kubectl_get_pods(world, "Pending", "0/1", restarts, f"{random.randint(1,12)}m")
+
     events = render_events_table([{
-        "last_seen": "22s", "type": "Warning", "reason": "FailedMount", "object": f"pod/{pod_name}",
-        "message": f"MountVolume.SetUp failed for volume \"data\" : persistentvolumeclaim \"{pvc_name}\" not found"
+        "last_seen": "22s",
+        "type": "Warning",
+        "reason": "FailedMount",
+        "object": f"pod/{pod_name}",
+        "message": f'MountVolume.SetUp failed for volume "data" : persistentvolumeclaim "{pvc_name}" not found'
     }])
-    describe = render_describe_pod(world, pod_name, "Pending", restarts, events, last_state="Waiting", exit_code=0, message="PVC not found")
-    logs = render_logs(base, [(0, "INFO pod waiting for volume mount")])
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="Pending",
+        restarts=restarts,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="PVC not found",
+        ready=False
+    )
+
+    logs = waiting_logs_error(world, pod_name, "ContainerCreating")
 
     diagnosis = f"Pod cannot mount volume because PVC `{pvc_name}` does not exist in `{ns}` (FailedMount)."
     fix_plan = [
-        f"Create PVC `{pvc_name}` OR update workload volume claimName to an existing PVC.",
-        "Apply change and verify mount succeeds.",
-        f"Confirm pod becomes Running/Ready in `{ns}`."
+        f"Create PVC `{pvc_name}` or update the workload to use an existing PVC.",
+        "Recreate or restart the workload after the claim reference is corrected.",
+        f"Verify the Pod becomes Running and Ready in `{ns}`."
     ]
 
     actions = [
+        {"type": "kubectl_get_pvc", "cmd": f"kubectl -n {ns} get pvc"},
         {"type": "kubectl_apply_pvc", "cmd": f"kubectl -n {ns} apply -f pvc.yaml  # name={pvc_name}"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pvc && kubectl -n {ns} describe pod {pod_name}"}
     ]
-    rollback = ["Delete created PVC if incorrect; re-apply correct PVC."]
+
+    rollback = ["Delete the wrongly created PVC and restore the correct claim reference if needed."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "pvc_not_found_mountfail", "variant": "pvc_missing", "fault_params": {"pvc": pvc_name}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": False}},
-        remediation={"category": "FailedMount", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": [f"No FailedMount; pod Running/Ready in `{ns}`."],
-                     "rollback": rollback}
-    )
-
-def scenario_oomkilled_limit_too_low(world):
-    ns = world["namespace"]
-    w = world["workload"]
-    base = now_utc()
-
-    w["container"]["resources"]["limits"]["memory"] = "256Mi"
-    restarts = random.randint(2, 12)
-    pod_name, getpods = render_kubectl_get_pods(world, "CrashLoopBackOff", "0/1", restarts, f"{random.randint(2,12)}m")
-    events = render_events_table([
-        {"last_seen": "25s", "type": "Warning", "reason": "OOMKilled", "object": f"pod/{pod_name}",
-         "message": f"Container {w['container']['name']} was OOMKilled (memory limit {w['container']['resources']['limits']['memory']})"},
-        {"last_seen": "20s", "type": "Warning", "reason": "BackOff", "object": f"pod/{pod_name}",
-         "message": "Back-off restarting failed container"}
-    ])
-    describe = render_describe_pod(world, pod_name, "CrashLoopBackOff", restarts, events, exit_code=137, message="OOMKilled")
-    logs = render_logs(base, [(0, f"INFO starting {w['name']}"), (6, "ERROR process killed (likely OOM)")])
-    logs = add_noise_logs(logs, base)
-
-    diagnosis = "Container is repeatedly OOMKilled because memory limit is too low."
-    old_lim = w["container"]["resources"]["limits"]["memory"]
-    new_lim = choice_weighted([("512Mi", 40), ("1Gi", 45), ("2Gi", 15)])
-    fix_plan = [
-        f"Increase memory limit from `{old_lim}` to `{new_lim}` (and adjust request if needed).",
-        "Apply change and rollout restart.",
-        f"Verify restarts stop increasing and pod becomes Ready in `{ns}`."
-    ]
-
-    actions = [
-        {"type": "kubectl_patch_resources", "cmd": f"kubectl -n {ns} patch deploy/{w['name']} --type merge -p '<resources patch>'"},
-        {"type": "validate", "cmd": f"kubectl -n {ns} get pods && kubectl -n {ns} describe pod {pod_name}"}
-    ]
-    rollback = ["Restore prior limit and investigate memory usage."]
-
-    return pack_sample(
-        world,
-        fault={"scenario_id": "oomkilled_limit_too_low", "variant": "oomkilled", "fault_params": {"old_limit": old_lim, "new_limit": new_lim}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": True}},
-        remediation={"category": "CrashLoopBackOff", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": ["Pod Ready; restarts stop increasing."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "pvc_not_found_mountfail",
+            "variant": "pvc_missing",
+            "fault_params": {"pvc": pvc_name}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": False}
+        },
+        remediation={
+            "category": "FailedMount",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": [f"No FailedMount remains; pod Running and Ready in `{ns}`."],
+            "rollback": rollback
+        }
     )
 
 def scenario_readiness_probe_failure(world):
@@ -1091,13 +1553,31 @@ def scenario_readiness_probe_failure(world):
     w = world["workload"]
     base = now_utc()
 
-    restarts = random.randint(0, 3)
+    restarts = 0
     pod_name, getpods = render_kubectl_get_pods(world, "Running", "0/1", restarts, f"{random.randint(2,10)}m")
+
     events = render_events_table([{
-        "last_seen": "30s", "type": "Warning", "reason": "Unhealthy", "object": f"pod/{pod_name}",
+        "last_seen": "30s",
+        "type": "Warning",
+        "reason": "Unhealthy",
+        "object": f"pod/{pod_name}",
         "message": "Readiness probe failed: HTTP probe failed with statuscode: 503"
     }])
-    describe = render_describe_pod(world, pod_name, "Running", restarts, events, last_state="Running", exit_code=0, message="Readiness probe failing")
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Running",
+        container_state="Running",
+        reason="Running",
+        restarts=restarts,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message=None,
+        ready=False
+    )
+
     logs = render_logs(base, [
         (0, f"INFO starting {w['name']}"),
         (5, "INFO http server started on :8080"),
@@ -1106,28 +1586,42 @@ def scenario_readiness_probe_failure(world):
     ])
     logs = add_noise_logs(logs, base)
 
-    diagnosis = "Pod is running but NotReady due to failing readiness probe (503)."
+    diagnosis = "Pod is Running but NotReady because the readiness probe fails with HTTP 503."
     fix_plan = [
-        "Confirm readiness probe path/port/initialDelay match app behavior.",
-        "Fix dependency connectivity (DB/cache) or adjust probe timeouts.",
-        "Apply changes and verify pod becomes Ready."
+        "Confirm the readiness probe path, port, and timing match application startup behavior.",
+        "Fix dependency readiness issues or tune probe delays and thresholds.",
+        f"Verify the Pod becomes Ready in `{ns}` without unnecessary restarts."
     ]
 
     actions = [
-        {"type": "kubectl_edit_deploy", "cmd": f"kubectl -n {ns} edit deploy/{w['name']}  # fix readinessProbe"},
+        {"type": "kubectl_edit_workload", "cmd": f"kubectl -n {ns} edit {w['kind'].lower()}/{w['name']}"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods && kubectl -n {ns} describe pod {pod_name}"}
     ]
-    rollback = ["Undo probe edit and redeploy."]
+
+    rollback = ["Undo the readiness probe change if it hides real application readiness issues."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "readiness_probe_failure", "variant": "http_503", "fault_params": {}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": False}},
-        remediation={"category": "NotReady", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": ["READY becomes 1/1; endpoints include pod."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "readiness_probe_failure",
+            "variant": "http_503",
+            "fault_params": {}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": False}
+        },
+        remediation={
+            "category": "NotReady",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": ["READY becomes 1/1; endpoints include the pod."],
+            "rollback": rollback
+        }
     )
 
 def scenario_liveness_probe_failure(world):
@@ -1137,38 +1631,80 @@ def scenario_liveness_probe_failure(world):
 
     restarts = random.randint(3, 15)
     pod_name, getpods = render_kubectl_get_pods(world, "CrashLoopBackOff", "0/1", restarts, f"{random.randint(3,12)}m")
+
     events = render_events_table([
-        {"last_seen": "40s", "type": "Warning", "reason": "Unhealthy", "object": f"pod/{pod_name}",
-         "message": "Liveness probe failed: Get \"http://10.0.0.12:8080/healthz\": context deadline exceeded"},
-        {"last_seen": "35s", "type": "Normal", "reason": "Killing", "object": f"pod/{pod_name}",
-         "message": "Container failed liveness probe, will be restarted"}
+        {
+            "last_seen": "40s",
+            "type": "Warning",
+            "reason": "Unhealthy",
+            "object": f"pod/{pod_name}",
+            "message": 'Liveness probe failed: Get "http://10.0.0.12:8080/healthz": context deadline exceeded'
+        },
+        {
+            "last_seen": "35s",
+            "type": "Normal",
+            "reason": "Killing",
+            "object": f"pod/{pod_name}",
+            "message": "Container failed liveness probe, will be restarted"
+        }
     ])
-    describe = render_describe_pod(world, pod_name, "CrashLoopBackOff", restarts, events, exit_code=1, message="Liveness probe failed; container restarted")
-    logs = render_logs(base, [(0, f"INFO starting {w['name']}"), (10, "WARN health endpoint slow; liveness may timeout")])
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Running",
+        container_state="Waiting",
+        reason="CrashLoopBackOff",
+        restarts=restarts,
+        events_table=events,
+        last_state="Terminated",
+        exit_code=1,
+        message="Back-off restarting failed container",
+        ready=False
+    )
+
+    logs = render_logs(base, [
+        (0, f"INFO starting {w['name']}"),
+        (10, "WARN health endpoint slow; liveness may timeout"),
+    ])
     logs = add_noise_logs(logs, base)
 
-    diagnosis = "Container restarts due to failing liveness probe (timeout/incorrect path/slow startup)."
+    diagnosis = "Container is repeatedly restarted because the liveness probe fails before the application can respond successfully."
     fix_plan = [
-        "Review liveness probe path/port/timeout; increase initialDelaySeconds for slow startups.",
-        "Investigate app slowness (CPU throttling, GC pauses, dependency latency).",
+        "Review the liveness probe path, port, timeout, and initial delay.",
+        "Investigate application slowness, dependency latency, or resource pressure.",
         "Apply probe tuning and verify restarts stop increasing."
     ]
 
     actions = [
-        {"type": "kubectl_edit_deploy", "cmd": f"kubectl -n {ns} edit deploy/{w['name']}  # tune livenessProbe"},
+        {"type": "kubectl_edit_workload", "cmd": f"kubectl -n {ns} edit {w['kind'].lower()}/{w['name']}"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
     ]
-    rollback = ["Undo probe changes if they regress detection."]
+
+    rollback = ["Undo the liveness probe changes if they make failure detection too weak."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "liveness_probe_failure", "variant": "timeout", "fault_params": {}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": False}},
-        remediation={"category": "CrashLoopBackOff", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": ["Restarts stop increasing; pod Ready."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "liveness_probe_failure",
+            "variant": "timeout",
+            "fault_params": {}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": False}
+        },
+        remediation={
+            "category": "CrashLoopBackOff",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": ["Restarts stop increasing; pod Ready."],
+            "rollback": rollback
+        }
     )
 
 def scenario_rbac_forbidden(world):
@@ -1178,40 +1714,73 @@ def scenario_rbac_forbidden(world):
 
     restarts = random.randint(1, 6)
     pod_name, getpods = render_kubectl_get_pods(world, "CrashLoopBackOff", "0/1", restarts, f"{random.randint(2,10)}m")
+
     events = render_events_table([{
-        "last_seen": "18s", "type": "Warning", "reason": "BackOff", "object": f"pod/{pod_name}",
+        "last_seen": "18s",
+        "type": "Warning",
+        "reason": "BackOff",
+        "object": f"pod/{pod_name}",
         "message": "Back-off restarting failed container"
     }])
-    describe = render_describe_pod(world, pod_name, "CrashLoopBackOff", restarts, events, exit_code=1, message="RBAC Forbidden")
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Running",
+        container_state="Waiting",
+        reason="CrashLoopBackOff",
+        restarts=restarts,
+        events_table=events,
+        last_state="Terminated",
+        exit_code=1,
+        message="Back-off restarting failed container",
+        ready=False
+    )
+
     logs = render_logs(base, [
         (0, f"INFO starting {w['name']}"),
-        (4, f"ERROR Forbidden: User \"system:serviceaccount:{ns}:{w['serviceAccountName']}\" cannot list resource \"pods\" in API group \"\" in the namespace \"{ns}\""),
+        (4, f'ERROR Forbidden: User "system:serviceaccount:{ns}:{w["serviceAccountName"]}" cannot list resource "pods" in API group "" in the namespace "{ns}"'),
     ])
     logs = add_noise_logs(logs, base)
 
-    diagnosis = "Workload fails due to RBAC permission error (Forbidden) for its ServiceAccount."
+    diagnosis = "Workload fails due to an RBAC permission error (Forbidden) for its ServiceAccount."
     fix_plan = [
-        f"Create/update Role and RoleBinding granting least-privilege access for ServiceAccount `{w['serviceAccountName']}`.",
-        "Apply RBAC and restart workload.",
-        "Verify logs no longer show Forbidden and pod stabilizes."
+        f"Check the permissions of ServiceAccount `{w['serviceAccountName']}`.",
+        "Create or update the least-privilege Role and RoleBinding required by the app.",
+        "Restart the workload and verify Forbidden errors disappear."
     ]
 
     actions = [
+        {"type": "kubectl_auth_can_i", "cmd": f"kubectl auth can-i list pods --as=system:serviceaccount:{ns}:{w['serviceAccountName']} -n {ns}"},
         {"type": "kubectl_apply_rbac", "cmd": f"kubectl -n {ns} apply -f role.yaml -f rolebinding.yaml"},
-        {"type": "kubectl_rollout_restart", "cmd": f"kubectl -n {ns} rollout restart deploy/{w['name']}"},
-        {"type": "validate", "cmd": f"kubectl -n {ns} logs deploy/{w['name']} --tail=50"}
+        {"type": "kubectl_rollout_restart", "cmd": rollout_restart_cmd(ns, world)},
+        {"type": "validate", "cmd": f"kubectl -n {ns} logs {w['kind'].lower()}/{w['name']} --tail=50"}
     ]
-    rollback = ["Delete overly permissive RBAC and apply corrected policy."]
+
+    rollback = ["Remove overly permissive RBAC and replace it with the correct least-privilege policy."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "rbac_forbidden", "variant": "serviceaccount_missing_role", "fault_params": {"serviceaccount": w["serviceAccountName"]}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": False}},
-        remediation={"category": "CrashLoopBackOff", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": ["Forbidden error disappears; pod stabilizes."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "rbac_forbidden",
+            "variant": "serviceaccount_missing_role",
+            "fault_params": {"serviceaccount": w["serviceAccountName"]}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": False}
+        },
+        remediation={
+            "category": "CrashLoopBackOff",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": ["Forbidden error disappears; pod stabilizes."],
+            "rollback": rollback
+        }
     )
 
 def scenario_dns_resolution_failure(world):
@@ -1221,37 +1790,80 @@ def scenario_dns_resolution_failure(world):
 
     restarts = random.randint(1, 8)
     pod_name, getpods = render_kubectl_get_pods(world, "CrashLoopBackOff", "0/1", restarts, f"{random.randint(2,10)}m")
+
     events = render_events_table([{
-        "last_seen": "22s", "type": "Warning", "reason": "BackOff", "object": f"pod/{pod_name}",
+        "last_seen": "22s",
+        "type": "Warning",
+        "reason": "BackOff",
+        "object": f"pod/{pod_name}",
         "message": "Back-off restarting failed container"
     }])
-    describe = render_describe_pod(world, pod_name, "CrashLoopBackOff", restarts, events, exit_code=1, message="DNS lookup failed")
-    dep = random.choice(["postgres.default.svc.cluster.local", "redis.default.svc.cluster.local", "kafka.observability.svc.cluster.local"])
-    logs = render_logs(base, [(0, f"INFO starting {w['name']}"), (5, f"ERROR dial tcp: lookup {dep} on 10.96.0.10:53: no such host")])
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Running",
+        container_state="Waiting",
+        reason="CrashLoopBackOff",
+        restarts=restarts,
+        events_table=events,
+        last_state="Terminated",
+        exit_code=1,
+        message="Back-off restarting failed container",
+        ready=False
+    )
+
+    dep = random.choice([
+        "postgres.default.svc.cluster.local",
+        "redis.default.svc.cluster.local",
+        "kafka.observability.svc.cluster.local"
+    ])
+
+    logs = render_logs(base, [
+        (0, f"INFO starting {w['name']}"),
+        (3, f"INFO resolving dependency host {dep}"),
+        (5, f"ERROR lookup {dep} on 10.96.0.10:53: no such host"),
+        (6, "ERROR startup failed"),
+    ])
     logs = add_noise_logs(logs, base)
 
     diagnosis = "Workload fails due to DNS resolution failure for a cluster service (no such host)."
     fix_plan = [
-        "Confirm the Service name/namespace is correct and service exists (`kubectl get svc`).",
+        "Confirm the Service name and namespace are correct.",
         "Check CoreDNS health and cluster DNS configuration.",
-        "Fix service reference or restore DNS; restart workload and verify it resolves hostname."
+        "Fix the service reference or restore DNS, then verify the application resolves the hostname."
     ]
+
     actions = [
         {"type": "inspect_service", "cmd": f"kubectl -n {ns} get svc"},
         {"type": "inspect_coredns", "cmd": "kubectl -n kube-system get pods -l k8s-app=kube-dns"},
-        {"type": "validate", "cmd": f"kubectl -n {ns} logs deploy/{w['name']} --tail=50"}
+        {"type": "validate", "cmd": f"kubectl -n {ns} logs {w['kind'].lower()}/{w['name']} --tail=50"}
     ]
-    rollback = ["Revert any DNS/service config change if it worsens resolution."]
+
+    rollback = ["Revert any DNS or service configuration change that worsens name resolution."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "dns_resolution_failure", "variant": "no_such_host", "fault_params": {"hostname": dep}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": False}},
-        remediation={"category": "CrashLoopBackOff", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": ["Hostname resolves; app connects; pod Ready."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "dns_resolution_failure",
+            "variant": "no_such_host",
+            "fault_params": {"hostname": dep}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": False}
+        },
+        remediation={
+            "category": "CrashLoopBackOff",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": ["Hostname resolves; app connects; pod Ready."],
+            "rollback": rollback
+        }
     )
 
 def scenario_service_connection_refused(world):
@@ -1261,90 +1873,252 @@ def scenario_service_connection_refused(world):
 
     restarts = random.randint(1, 8)
     pod_name, getpods = render_kubectl_get_pods(world, "CrashLoopBackOff", "0/1", restarts, f"{random.randint(2,10)}m")
+
     events = render_events_table([{
-        "last_seen": "24s", "type": "Warning", "reason": "BackOff", "object": f"pod/{pod_name}",
+        "last_seen": "24s",
+        "type": "Warning",
+        "reason": "BackOff",
+        "object": f"pod/{pod_name}",
         "message": "Back-off restarting failed container"
     }])
-    describe = render_describe_pod(world, pod_name, "CrashLoopBackOff", restarts, events, exit_code=1, message="connection refused")
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Running",
+        container_state="Waiting",
+        reason="CrashLoopBackOff",
+        restarts=restarts,
+        events_table=events,
+        last_state="Terminated",
+        exit_code=1,
+        message="Back-off restarting failed container",
+        ready=False
+    )
+
     svc = random.choice(["redis", "postgres", "kafka"])
-    host = f"{svc}.{ns}.svc.cluster.local:6379" if svc == "redis" else f"{svc}.{ns}.svc.cluster.local:5432"
-    logs = render_logs(base, [(0, f"INFO starting {w['name']}"), (6, f"ERROR dial tcp {host}: connect: connection refused")])
+    if svc == "redis":
+        host = f"redis.{ns}.svc.cluster.local:6379"
+    elif svc == "postgres":
+        host = f"postgres.{ns}.svc.cluster.local:5432"
+    else:
+        host = f"kafka.{ns}.svc.cluster.local:9092"
+
+    logs = render_logs(base, [
+        (0, f"INFO starting {w['name']}"),
+        (6, f"ERROR dial tcp {host}: connect: connection refused")
+    ])
     logs = add_noise_logs(logs, base)
 
-    diagnosis = "App cannot connect to dependency service (connection refused) due to service/pod down or wrong port."
+    diagnosis = "App cannot connect to a dependency service because the connection is refused, usually due to the backend being down or the port being wrong."
     fix_plan = [
-        f"Check if Service `{svc}` has endpoints and backing pods are Ready.",
-        "Verify the port is correct and no NetworkPolicy is blocking traffic.",
-        "Restore the dependency or fix service config; restart workload and verify connection succeeds."
+        f"Check whether Service `{svc}` has endpoints and whether its backing pods are Ready.",
+        "Verify the configured port is correct and traffic is not blocked by NetworkPolicy.",
+        "Restore the dependency or correct the service configuration, then verify the app connects."
     ]
+
     actions = [
         {"type": "check_service", "cmd": f"kubectl -n {ns} get svc {svc} && kubectl -n {ns} get endpoints {svc}"},
         {"type": "check_pods", "cmd": f"kubectl -n {ns} get pods"},
-        {"type": "validate", "cmd": f"kubectl -n {ns} logs deploy/{w['name']} --tail=50"}
+        {"type": "validate", "cmd": f"kubectl -n {ns} logs {w['kind'].lower()}/{w['name']} --tail=50"}
     ]
-    rollback = ["Revert any service/port changes if incorrect."]
+
+    rollback = ["Revert any incorrect service or port change."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "service_connection_refused", "variant": "dependency_down_or_port", "fault_params": {"service": svc}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": restarts, "oom_killed": False}},
-        remediation={"category": "CrashLoopBackOff", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": ["Connection succeeds; pod Ready."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "service_connection_refused",
+            "variant": "dependency_down_or_port",
+            "fault_params": {"service": svc}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": False}
+        },
+        remediation={
+            "category": "CrashLoopBackOff",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": ["Connection succeeds; pod Ready."],
+            "rollback": rollback
+        }
     )
 
 def scenario_quota_exceeded_pods(world):
     ns = world["namespace"]
     w = world["workload"]
-    base = now_utc()
 
     quota = world["inventory"]["quota"]
-    quota["pods_used"] = quota["pods_limit"]  # hit the limit
+    quota["pods_used"] = quota["pods_limit"]
 
-    pod_name, getpods = render_kubectl_get_pods(world, "Pending", "0/1", 0, f"{random.randint(1,15)}m")
+    pod_name = f"{w['name']}-{rand_name('pod',4)}"
+    getpods = "NAME\tREADY\tSTATUS\tRESTARTS\tAGE\n"
+
     events = render_events_table([{
-        "last_seen": "14s", "type": "Warning", "reason": "FailedCreate", "object": f"replicaset/{w['name']}",
-        "message": f"Error creating: pods \"{pod_name}\" is forbidden: exceeded quota: pods, requested: 1, used: {quota['pods_used']}, limited: {quota['pods_limit']}"
+        "last_seen": "14s",
+        "type": "Warning",
+        "reason": "FailedCreate",
+        "object": f"replicaset/{w['name']}",
+        "message": f'Error creating: pods "{pod_name}" is forbidden: exceeded quota: pods, requested: 1, used: {quota["pods_used"]}, limited: {quota["pods_limit"]}'
     }])
-    describe = render_describe_pod(world, pod_name, "Pending", 0, events, last_state="Waiting", exit_code=0, message="Quota exceeded")
-    logs = render_logs(base, [(0, "INFO pod not created due to quota")])
 
-    diagnosis = "Workload cannot create pods because namespace ResourceQuota for pods is exceeded."
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Pending",
+        container_state="Waiting",
+        reason="Pending",
+        restarts=0,
+        events_table=events,
+        last_state=None,
+        exit_code=None,
+        message="Quota exceeded",
+        ready=False
+    )
+
+    logs = "No logs available: pod was not successfully created.\n"
+
+    diagnosis = "Controller cannot create a new Pod because the namespace ResourceQuota for pods is exhausted."
     fix_plan = [
-        "Identify which pods can be cleaned up (completed Jobs, old replicas) or increase ResourceQuota.",
-        "Apply cleanup/quota change, then retry rollout.",
-        f"Verify workload creates pods successfully in `{ns}`."
+        "Identify completed or unused pods that can be cleaned up, or increase the namespace pod quota.",
+        "Retry the rollout after cleanup or quota adjustment.",
+        f"Verify the workload can create Pods successfully in `{ns}`."
     ]
+
     actions = [
         {"type": "check_quota", "cmd": f"kubectl -n {ns} get resourcequota"},
         {"type": "cleanup", "cmd": f"kubectl -n {ns} get pods --field-selector=status.phase=Succeeded"},
         {"type": "validate", "cmd": f"kubectl -n {ns} get pods"}
     ]
-    rollback = ["Revert quota increase if it causes resource pressure; prefer cleanup/rightsizing."]
+
+    rollback = ["Revert a quota increase if it causes broader resource pressure; prefer cleanup or rightsizing."]
 
     return pack_sample(
         world,
-        fault={"scenario_id": "quota_exceeded_pods", "variant": "resourcequota_pods", "fault_params": {"pods_used": quota["pods_used"], "pods_limit": quota["pods_limit"]}},
-        observations={"kubectl_get_pods": getpods, "kubectl_describe_pod": describe, "kubectl_get_events": events,
-                      "container_logs": logs,
-                      "metrics_snapshot": {"restarts": 0, "oom_killed": False}},
-        remediation={"category": "FailedCreate", "diagnosis": diagnosis, "fix_plan": fix_plan,
-                     "actions_structured": actions, "verification": ["New pods are created; rollout proceeds."],
-                     "rollback": rollback}
+        fault={
+            "scenario_id": "quota_exceeded_pods",
+            "variant": "resourcequota_pods",
+            "fault_params": {"pods_used": quota["pods_used"], "pods_limit": quota["pods_limit"]}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": 0, "oom_killed": False}
+        },
+        remediation={
+            "category": "FailedCreate",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": ["New pods are created; rollout proceeds."],
+            "rollback": rollback
+        }
+    )
+def scenario_oomkilled_limit_too_low(world):
+    ns = world["namespace"]
+    w = world["workload"]
+    base = now_utc()
+
+    old_lim = w["container"]["resources"]["limits"]["memory"]
+    w["container"]["resources"]["limits"]["memory"] = "256Mi"
+
+    restarts = random.randint(2, 12)
+    pod_name, getpods = render_kubectl_get_pods(world, "CrashLoopBackOff", "0/1", restarts, f"{random.randint(2,12)}m")
+
+    events = render_events_table([
+        {
+            "last_seen": "25s",
+            "type": "Warning",
+            "reason": "Killing",
+            "object": f"pod/{pod_name}",
+            "message": f'Container {w["container"]["name"]} was OOMKilled (memory limit {w["container"]["resources"]["limits"]["memory"]})'
+        },
+        {
+            "last_seen": "20s",
+            "type": "Warning",
+            "reason": "BackOff",
+            "object": f"pod/{pod_name}",
+            "message": "Back-off restarting failed container"
+        }
+    ])
+
+    describe = render_describe_pod(
+        world,
+        pod_name,
+        pod_phase="Running",
+        container_state="Waiting",
+        reason="CrashLoopBackOff",
+        restarts=restarts,
+        events_table=events,
+        last_state="Terminated",
+        exit_code=137,
+        message="OOMKilled",
+        ready=False
     )
 
+    logs = render_logs(base, [
+        (0, f"INFO starting {w['name']}"),
+        (4, "INFO loading dataset into memory"),
+        (9, "INFO processing batch size=50000"),
+        (12, "Killed"),
+    ])
+    logs = add_noise_logs(logs, base)
+
+    new_lim = choice_weighted([("512Mi", 40), ("1Gi", 45), ("2Gi", 15)])
+    diagnosis = "Container is repeatedly OOMKilled because its memory limit is too low."
+    fix_plan = [
+        f"Increase the memory limit from `256Mi` to something more realistic such as `{new_lim}`.",
+        "Adjust the memory request as needed to match application behavior.",
+        f"Restart the workload and verify restarts stop increasing in `{ns}`."
+    ]
+
+    actions = [
+        {"type": "kubectl_patch_resources", "cmd": f"kubectl -n {ns} patch {w['kind'].lower()}/{w['name']} --type merge -p '<resources patch>'"},
+        {"type": "kubectl_rollout_restart", "cmd": rollout_restart_cmd(ns, world)},
+        {"type": "validate", "cmd": f"kubectl -n {ns} get pods && kubectl -n {ns} describe pod {pod_name}"}
+    ]
+
+    rollback = [f"Restore the previous memory limit `{old_lim}` if the new value is incorrect and investigate memory usage."]
+
+    return pack_sample(
+        world,
+        fault={
+            "scenario_id": "oomkilled_limit_too_low",
+            "variant": "oomkilled",
+            "fault_params": {"old_limit": old_lim, "new_limit": new_lim}
+        },
+        observations={
+            "kubectl_get_pods": getpods,
+            "kubectl_describe_pod": describe,
+            "kubectl_get_events": events,
+            "container_logs": logs,
+            "metrics_snapshot": {"restarts": restarts, "oom_killed": True}
+        },
+        remediation={
+            "category": "CrashLoopBackOff",
+            "diagnosis": diagnosis,
+            "fix_plan": fix_plan,
+            "actions_structured": actions,
+            "verification": ["Pod Ready; restarts stop increasing."],
+            "rollback": rollback
+        }
+    )
 
 # ---------------------------
 # Scenario Registry (15–20 scenarios)
 # ---------------------------
 
 def scenario_registry():
-    # 18 original scenarios minus gitops_sync_failed (GitOps removed)
     return [
-        ("crashloop_missing_secret", scenario_crashloop_missing_secret),
-        ("crashloop_bad_configmap_key", scenario_crashloop_bad_configmap_key),
+        ("createcontainerconfigerror_missing_secret", scenario_crashloop_missing_secret),
+        ("createcontainerconfigerror_bad_configmap_key", scenario_crashloop_bad_configmap_key),
         ("crashloop_bad_args", scenario_crashloop_bad_args),
 
         ("imagepull_bad_tag", scenario_imagepull_bad_tag),
@@ -1353,20 +2127,20 @@ def scenario_registry():
         ("failedscheduling_taint", scenario_failedscheduling_taint),
         ("failedscheduling_insufficient_memory", scenario_failedscheduling_insufficient_memory),
         ("failedscheduling_insufficient_cpu", scenario_failedscheduling_insufficient_cpu),
-        ("nodeselector_mismatch", scenario_nodeselector_mismatch),
+        ("failedscheduling_nodeselector_mismatch", scenario_nodeselector_mismatch),
 
-        ("pvc_pending_missing_storageclass", scenario_pvc_pending_missing_storageclass),
-        ("pvc_not_found_mountfail", scenario_pvc_not_found_mountfail),
+        ("pending_unbound_pvc_missing_storageclass", scenario_pvc_pending_missing_storageclass),
+        ("failedmount_pvc_not_found", scenario_pvc_not_found_mountfail),
 
-        ("oomkilled_limit_too_low", scenario_oomkilled_limit_too_low),
+        ("crashloop_oomkilled_limit_too_low", scenario_oomkilled_limit_too_low),
 
-        ("readiness_probe_failure", scenario_readiness_probe_failure),
-        ("liveness_probe_failure", scenario_liveness_probe_failure),
+        ("notready_readiness_probe_failure", scenario_readiness_probe_failure),
+        ("crashloop_liveness_probe_failure", scenario_liveness_probe_failure),
 
-        ("rbac_forbidden", scenario_rbac_forbidden),
-        ("dns_resolution_failure", scenario_dns_resolution_failure),
-        ("service_connection_refused", scenario_service_connection_refused),
-        ("quota_exceeded_pods", scenario_quota_exceeded_pods),
+        ("crashloop_rbac_forbidden", scenario_rbac_forbidden),
+        ("crashloop_dns_resolution_failure", scenario_dns_resolution_failure),
+        ("crashloop_service_connection_refused", scenario_service_connection_refused),
+        ("failedcreate_quota_exceeded_pods", scenario_quota_exceeded_pods),
     ]
 
 
@@ -1374,14 +2148,10 @@ def scenario_registry():
 # BALANCED dataset generation
 # ---------------------------
 
-def generate_balanced_dataset(per_scenario_targets, out_source, out_sft, out_stats, max_tries_per_sample=25):
-    """
-    per_scenario_targets: dict scenario_id -> target_count
-    """
+def generate_balanced_dataset(per_scenario_targets, out_source, out_stats, max_tries_per_sample=25):
     scenarios = dict(scenario_registry())
     counts = {sid: 0 for sid in per_scenario_targets}
     source_rows = []
-    sft_rows = []
     rejected = 0
 
     for sid, target in per_scenario_targets.items():
@@ -1401,15 +2171,9 @@ def generate_balanced_dataset(per_scenario_targets, out_source, out_sft, out_sta
 
             counts[sid] += 1
             source_rows.append(sample)
-            sft_rows.append(to_sft_pair(sample))
 
-    # write
     with open(out_source, "w") as f:
         for r in source_rows:
-            f.write(json.dumps(r) + "\n")
-
-    with open(out_sft, "w") as f:
-        for r in sft_rows:
             f.write(json.dumps(r) + "\n")
 
     stats = {
@@ -1432,11 +2196,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--outdir", type=str, default=".", help="Output directory")
     ap.add_argument("--seed", type=int, default=None, help="Random seed")
-
-    # Choose either fixed per-scenario OR range per-scenario
     ap.add_argument("--per_scenario", type=int, default=None, help="Fixed count per scenario (e.g., 500)")
-    ap.add_argument("--per_scenario_min", type=int, default=400, help="Min count per scenario (used if --per_scenario not set)")
-    ap.add_argument("--per_scenario_max", type=int, default=600, help="Max count per scenario (used if --per_scenario not set)")
+    ap.add_argument("--per_scenario_min", type=int, default=400, help="Min count per scenario")
+    ap.add_argument("--per_scenario_max", type=int, default=600, help="Max count per scenario")
     args = ap.parse_args()
 
     if args.seed is not None:
@@ -1444,13 +2206,11 @@ def main():
 
     os.makedirs(args.outdir, exist_ok=True)
     out_source = os.path.join(args.outdir, "synthetic_source.jsonl")
-    out_sft = os.path.join(args.outdir, "synthetic_sft.jsonl")
     out_stats = os.path.join(args.outdir, "stats.json")
 
     reg = scenario_registry()
     scenario_ids = [sid for sid, _ in reg]
 
-    # Build per-scenario targets
     per_scenario_targets = {}
     if args.per_scenario is not None:
         for sid in scenario_ids:
@@ -1466,11 +2226,10 @@ def main():
     total_target = sum(per_scenario_targets.values())
     print(f"[plan] scenarios={len(scenario_ids)} total_target={total_target} per_scenario≈{min(per_scenario_targets.values())}-{max(per_scenario_targets.values())}")
 
-    stats = generate_balanced_dataset(per_scenario_targets, out_source, out_sft, out_stats)
+    stats = generate_balanced_dataset(per_scenario_targets, out_source, out_stats)
     print(json.dumps({
         "generated_total": stats["generated_total"],
         "out_source": out_source,
-        "out_sft": out_sft,
         "out_stats": out_stats,
         "per_scenario_generated": stats["per_scenario_generated"],
     }, indent=2))
