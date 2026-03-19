@@ -17,7 +17,13 @@ provider "aws" {
 variable "cluster_name" {
   description = "EKS cluster name"
   type        = string
-  default     = "elk-prod"
+  default     = "mas-elk-prod"
+}
+
+variable "cluster_admin_arns" {
+  description = "List of IAM user/role ARNs to grant cluster admin access"
+  type        = list(string)
+  default     = []
 }
 
 variable "vpc_cidr" {
@@ -82,6 +88,32 @@ resource "aws_subnet" "public_2" {
   }
 }
 
+resource "aws_subnet" "public_3" {
+  vpc_id                  = aws_vpc.eks_vpc.id
+  cidr_block              = "10.0.3.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[2]
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name                                        = "${var.cluster_name}-public-3"
+    "kubernetes.io/role/elb"                    = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+  }
+}
+
+resource "aws_subnet" "public_4" {
+  vpc_id                  = aws_vpc.eks_vpc.id
+  cidr_block              = "10.0.4.0/24"
+  availability_zone       = data.aws_availability_zones.available.names[3]
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name                                        = "${var.cluster_name}-public-4"
+    "kubernetes.io/role/elb"                    = "1"
+    "kubernetes.io/cluster/${var.cluster_name}" = "shared"
+  }
+}
+
 # Route Table
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.eks_vpc.id
@@ -103,6 +135,16 @@ resource "aws_route_table_association" "public_1" {
 
 resource "aws_route_table_association" "public_2" {
   subnet_id      = aws_subnet.public_2.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "public_3" {
+  subnet_id      = aws_subnet.public_3.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "public_4" {
+  subnet_id      = aws_subnet.public_4.id
   route_table_id = aws_route_table.public.id
 }
 
@@ -147,10 +189,15 @@ resource "aws_iam_role_policy_attachment" "cluster_AmazonEKSVPCResourceControlle
 resource "aws_eks_cluster" "elk_prod" {
   name     = var.cluster_name
   role_arn = aws_iam_role.cluster_role.arn
-  version  = "1.31"
+  version  = "1.33"
 
   vpc_config {
-    subnet_ids              = [aws_subnet.public_1.id, aws_subnet.public_2.id]
+    subnet_ids = [
+      aws_subnet.public_1.id,
+      aws_subnet.public_2.id,
+      aws_subnet.public_3.id,
+      aws_subnet.public_4.id,
+    ]
     endpoint_public_access  = true
     endpoint_private_access = true
     public_access_cidrs     = ["0.0.0.0/0"]
@@ -214,22 +261,27 @@ resource "aws_iam_role_policy_attachment" "node_AmazonEC2FullAccess" {
   role       = aws_iam_role.node_role.name
 }
 
-# EKS Node Group - bare minimum for ELK stack
+# EKS Node Group
 resource "aws_eks_node_group" "elk_nodes" {
   cluster_name    = aws_eks_cluster.elk_prod.name
-  node_group_name = "${var.cluster_name}-nodes"
+  node_group_name = "default"
   node_role_arn   = aws_iam_role.node_role.arn
-  subnet_ids      = [aws_subnet.public_1.id, aws_subnet.public_2.id]
+  subnet_ids = [
+    aws_subnet.public_1.id,
+    aws_subnet.public_2.id,
+    aws_subnet.public_3.id,
+    aws_subnet.public_4.id,
+  ]
 
   ami_type       = "AL2023_x86_64_STANDARD"
-  instance_types = ["c7i-flex.large"]
+  instance_types = ["c1.xlarge"]
   capacity_type  = "ON_DEMAND"
+  disk_size      = 20
 
-  # Fixed size - no autoscaling
   scaling_config {
     desired_size = 2
     min_size     = 2
-    max_size     = 2
+    max_size     = 4
   }
 
   update_config {
