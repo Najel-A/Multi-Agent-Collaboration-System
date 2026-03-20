@@ -1,0 +1,93 @@
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: auto-train-script
+#   namespace: ml-pipelines
+# data:
+#   train_pipeline.py: |
+#     import argparse
+#     from pyspark.sql import SparkSession, functions as F
+#     from pyspark.sql.types import StructType, StructField, IntegerType
+
+#     def main():
+#         p = argparse.ArgumentParser()
+#         p.add_argument("--raw", required=True)
+#         p.add_argument("--checkpoint", required=True)
+#         p.add_argument("--processed", required=True)
+#         p.add_argument("--format", default="csv", choices=["parquet", "csv", "json"])
+#         p.add_argument("--trigger", default="2 minutes", help='e.g. "30 seconds", "2 minutes"')
+#         args = p.parse_args()
+
+#         spark = SparkSession.builder.appName("auto-train-pipeline").getOrCreate()
+#         spark.sparkContext.setLogLevel("WARN")
+
+#         # Explicit schema is REQUIRED for streaming CSV/JSON
+#         schema = StructType([
+#             StructField("id", IntegerType(), True),
+#             StructField("value", IntegerType(), True),
+#         ])
+
+#         reader = spark.readStream.format(args.format)
+
+#         if args.format == "csv":
+#             reader = (
+#                 reader.option("header", "true")
+#                       .option("mode", "PERMISSIVE")
+#                       .option("enforceSchema", "true")
+#                       .option("ignoreLeadingWhiteSpace", "true")
+#                       .option("ignoreTrailingWhiteSpace", "true")
+#                       .option("columnNameOfCorruptRecord", "_corrupt_record")
+#                       .schema(schema)
+#             )
+#         elif args.format == "json":
+#             reader = reader.option("multiLine", "false").schema(schema)
+
+#         df = reader.load(args.raw)
+
+#         # Add useful metadata + partition column
+#         df = (
+#             df.withColumn("event_date", F.current_date())
+#               .withColumn("source_file", F.input_file_name())
+#         )
+
+#         def foreach_batch(batch_df, batch_id):
+#             # Split good vs bad rows
+#             good = batch_df.filter(F.col("_corrupt_record").isNull()).drop("_corrupt_record") \
+#                 if "_corrupt_record" in batch_df.columns else batch_df
+
+#             bad = batch_df.filter(F.col("_corrupt_record").isNotNull()) \
+#                 if "_corrupt_record" in batch_df.columns else None
+
+#             # If nothing valid, don't write
+#             if good.rdd.isEmpty():
+#                 bad_count = 0 if bad is None else bad.count()
+#                 print(f"[foreachBatch] batch_id={batch_id} good_rows=0 bad_rows={bad_count}")
+#                 return
+
+#             out = good.withColumn("batch_id", F.lit(int(batch_id)))
+
+#             (out.write
+#                 .mode("append")
+#                 .partitionBy("event_date")
+#                 .parquet(args.processed))
+
+#             # Optionally write bad rows somewhere for debugging (uncomment if you want)
+#             # if bad is not None and not bad.rdd.isEmpty():
+#             #     (bad.withColumn("batch_id", F.lit(int(batch_id)))
+#             #         .write.mode("append").partitionBy("event_date")
+#             #         .json(args.processed.rstrip("/") + "/_bad_records"))
+
+#             print(f"[foreachBatch] batch_id={batch_id} wrote batch")
+
+#         q = (
+#             df.writeStream
+#               .foreachBatch(foreach_batch)
+#               .option("checkpointLocation", args.checkpoint)
+#               .trigger(processingTime=args.trigger)
+#               .start()
+#         )
+
+#         q.awaitTermination()
+
+#     if __name__ == "__main__":
+#         main()
