@@ -1,0 +1,1311 @@
+row_idx,scenario_id,pred_scenario,scenario_match,section_score,keyword_recall,command_recall,ground_truth,prediction,bertscore_p,bertscore_r,bertscore_f1,rouge1_f,rouge2_f,rougeL_f,bleu
+0,failedscheduling_insufficient_cpu,liveness_probe_failure,0,1.0,0.55,0.0,"## Diagnosis
+Pod cannot schedule because its CPU request exceeds the available node capacity (Insufficient cpu).
+
+## Fix Plan
+Reduce the CPU request to a realistic value such as `500m`, or add nodes with more CPU.
+Apply the resource change and let the scheduler retry placement.
+Verify the Pod becomes Running and Ready in `team-b`.
+
+## Actions
+[kubectl_patch_resources] kubectl -n team-b patch deployment/app-w-9evp --type merge -p '<resources patch>'
+[validate] kubectl -n team-b get pods
+
+## Verification
+Pod scheduled and Running in `team-b`.
+
+## Rollback
+Restore the original CPU request if the reduced value is incorrect.","## Diagnosis
+Pod cannot schedule because its CPU request exceeds the available node capacity (Insufficient cpu).
+
+## Fix Plan
+Reduce the CPU request to a reasonable value or increase resources in the parent namespace.
+
+## Actions
+Set `request.cpus` to `200m` (0.2 core).
+
+```shell
+kubectl patch pod app-w-9evp-pod-x98f -p '{
+  ""spec"": {
+    ""resources"": {
+      ""requests"": {
+        ""cpu"": ""200m""
+      }
+    }
+  }
+}'
+```
+
+## Verification
+Verify the pod scheduled successfully.
+
+```shell
+kubectl get pod app-w-9evp-pod-x98f
+```
+
+Expected output:
+```text
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-9evp-pod-x98f	1/1	Running	0	<seconds>
+```
+
+Check event history for successful scheduling.
+
+```shell
+kubectl describe pod app-w-9evp-pod-x98f
+```
+
+Expected output:
+```text
+...
+Status:
+  Phase: Succeeded
+Events:
+  TYPE REASON AGO COUNT
+  Success Rescheduled 5s 1
+```
+
+## Rollback Guidance
+If rolling back is needed, set the CPU request back to the original value (`500m`).
+
+```shell
+kubectl patch pod app-w-9evp-pod-x98f -p '{
+  ""spec"": {
+    ""resources"": {
+      ""requests"": {
+        ""cpu"": ""500m""
+      }
+    }
+  }
+}'
+```",0.79867435,0.8823967,0.83845073,0.504,0.25,0.368,0.16610313540100843
+1,pvc_not_found_mountfail,pvc_not_found_mountfail,1,1.0,0.475,0.0,"## Diagnosis
+Pod cannot mount volume because PVC `missing-pvc-6tbw` does not exist in `payments-4` (FailedMount).
+
+## Fix Plan
+Create PVC `missing-pvc-6tbw` or update the workload to use an existing PVC.
+Recreate or restart the workload after the claim reference is corrected.
+Verify the Pod becomes Running and Ready in `payments-4`.
+
+## Actions
+[kubectl_get_pvc] kubectl -n payments-4 get pvc
+[kubectl_apply_pvc] kubectl -n payments-4 apply -f pvc.yaml  # name=missing-pvc-6tbw
+[validate] kubectl -n payments-4 get pvc && kubectl -n payments-4 describe pod module-w-3xl6-pod-xudc
+
+## Verification
+No FailedMount remains; pod Running and Ready in `payments-4`.
+
+## Rollback
+Delete the wrongly created PVC and restore the correct claim reference if needed.","## Diagnosis
+Pod cannot mount volume because PVC `missing-pvc-6tbw` does not exist.
+
+## Fix Plan
+Create missing PVC `missing-pvc-6tbw` with correct name.
+
+## Actions
+Create PVC `missing-pvc-6tbw` with `kubectl apply`.
+
+```sh
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: missing-pvc-6tbw
+  namespace: payments-4
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8Gi
+EOF
+```
+
+## Verification
+Verify PVC `missing-pvc-6tbw` exists and check that the pod can mount it successfully.
+
+```sh
+# Check PVC was created
+kubectl get pvc -n payments-4
+
+# Check pod status
+kubectl get pod module-w-3xl6-pod-xudc -n payments-4
+```
+
+## Rollback Guidance
+If the PVC creation causes issues, delete the PVC and inspect the logs.
+
+```sh
+# Remove problematic PVC
+kubectl delete pvc missing-pvc-6tbw -n payments-4
+
+# Inspect pod logs
+kubectl logs module-w-3xl6-pod-xudc -n payments-4
+```",0.86393565,0.8734152,0.86864954,0.6030534351145037,0.3384615384615385,0.4122137404580153,0.20421966255235358
+2,pvc_not_found_mountfail,pvc_not_found_mountfail,1,1.0,0.525,0.0,"## Diagnosis
+Pod cannot mount volume because PVC `missing-pvc-vq38` does not exist in `team-a` (FailedMount).
+
+## Fix Plan
+Create PVC `missing-pvc-vq38` or update the workload to use an existing PVC.
+Recreate or restart the workload after the claim reference is corrected.
+Verify the Pod becomes Running and Ready in `team-a`.
+
+## Actions
+[kubectl_get_pvc] kubectl -n team-a get pvc
+[kubectl_apply_pvc] kubectl -n team-a apply -f pvc.yaml  # name=missing-pvc-vq38
+[validate] kubectl -n team-a get pvc && kubectl -n team-a describe pod backend-w-rnjy-pod-0a5a
+
+## Verification
+No FailedMount remains; pod Running and Ready in `team-a`.
+
+## Rollback
+Delete the wrongly created PVC and restore the correct claim reference if needed.","## Diagnosis
+Pod cannot mount volume because PVC `missing-pvc-vq38` does not exist.
+
+## Fix Plan
+Create missing PVC `missing-pvc-vq38`.
+
+## Actions
+Create PVC `missing-pvc-vq38` with `backend-w-rnjy` namespace.
+
+```shell
+kubectl apply -n team-a -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: missing-pvc-vq38
+  namespace: team-a
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8Gi
+EOF
+```
+
+## Verification
+Verify PVC `missing-pvc-vq38` exists and check that the pod is running.
+
+```shell
+# Check PVC was created
+kubectl get pvc -n team-a
+
+# Check pod status
+kubectl get pod backend-w-rnjy-pod-0a5a -n team-a
+```
+
+Expected output:
+PVC `missing-pvc-vq38` should be in `Bound` state and pod `backend-w-rnjy-pod-0a5a` should have `READY` state `1/1`.
+
+## Rollback Guidance
+If the fix causes issues, delete the PVC and revert to the previous state.
+
+```shell
+# Revert PVC deletion
+kubectl delete pvc missing-pvc-vq38 -n team-a
+
+# Restart the pod
+kubectl delete pod backend-w-rnjy-pod-0a5a -n team-a
+```",0.85863507,0.8755944,0.8670318,0.5972222222222223,0.3006993006993007,0.375,0.1857108565961765
+3,readiness_probe_failure,liveness_probe_failure,0,1.0,0.32432432432432434,0.0,"## Diagnosis
+Pod is Running but NotReady because the readiness probe fails with HTTP 503.
+
+## Fix Plan
+Confirm the readiness probe path, port, and timing match application startup behavior.
+Fix dependency readiness issues or tune probe delays and thresholds.
+Verify the Pod becomes Ready in `data-t-ay` without unnecessary restarts.
+
+## Actions
+[kubectl_edit_workload] kubectl -n data-t-ay edit job/backend-w-3rbh
+[validate] kubectl -n data-t-ay get pods && kubectl -n data-t-ay describe pod backend-w-3rbh-pod-tflt
+
+## Verification
+READY becomes 1/1; endpoints include the pod.
+
+## Rollback
+Undo the readiness probe change if it hides real application readiness issues.","## Diagnosis
+Pod is marked as `Ready: False` because the readiness probe is failing (HTTP code 503). The backend is likely unresponsive due to a dependency issue (db connection refused).
+
+## Fix Plan
+Update the readiness probe delay to wait for the application to start fully, then enable liveness probes to restart the container if it stops responding.
+
+## Actions
+Update the pod's readiness/liveness probe configuration.
+
+## Verification
+Confirm the fix by checking the workloads' `Ready` status and logs.
+
+## Rollback Guidance
+If the fix causes issues, roll back to the previous configuration.
+```python
+def fix_app_probes(workload_name):
+    # Update the readiness and liveness probe configurations
+    update_k8s_object(
+        resource_type='pod',
+        name=workload_name,
+        body={
+            'probes': {
+                'readinessProbe': {
+                    'httpGet': {
+                        'path': '/healthz',
+                        'port': 8080
+                    },
+                    'initialDelaySeconds': 10,
+                    'periodSeconds': 10,
+                    'timeoutSeconds': 5,
+                    'successThreshold': 1,
+                    'failureThreshold': 3
+                },
+                'livenessProbe': {
+                    'httpGet': {
+                        'path': '/healthz',
+                        'port': 8080
+                    },
+                    'initialDelaySeconds': 20,
+                    'periodSeconds': 20,
+                    'timeoutSeconds': 10,
+                    'successThreshold': 1,
+                    'failureThreshold': 3
+                }
+            }
+        }
+    )
+```
+```markdown
+### Diagnosis
+workload: backend-w-3rbh
+reason: Readiness probe failed (HTTP code 503) and backend is unresponsive due to db connection refused.
+
+### Fix",0.71225154,0.83451223,0.76855,0.3695652173913043,0.12408759124087593,0.20289855072463767,0.06991637677983892
+4,quota_exceeded_pods,quota_exceeded_pods,1,1.0,0.5238095238095238,0.0,"## Diagnosis
+Controller cannot create a new Pod because the namespace ResourceQuota for pods is exhausted.
+
+## Fix Plan
+Identify completed or unused pods that can be cleaned up, or increase the namespace pod quota.
+Retry the rollout after cleanup or quota adjustment.
+Verify the workload can create Pods successfully in `team-a-dev`.
+
+## Actions
+[check_quota] kubectl -n team-a-dev get resourcequota
+[cleanup] kubectl -n team-a-dev get pods --field-selector=status.phase=Succeeded
+[validate] kubectl -n team-a-dev get pods
+
+## Verification
+New pods are created; rollout proceeds.
+
+## Rollback
+Revert a quota increase if it causes broader resource pressure; prefer cleanup or rightsizing.","## Diagnosis
+Controller cannot create a new Pod because the namespace ResourceQuota for pods is exhausted.
+
+## Fix Plan
+Identify completed or unused pods that can be deleted to free up quota. Alternatively, increase the resource limits for pods if possible.
+
+## Actions
+Check for unused pods and delete them if necessary. If increasing the quota is needed, request an update.
+
+```sh
+kubectl get pods --all-namespaces | grep '0/1' | cut -d' ' -f1,2 | uniq | awk '{print ""kubectl delete pod ""--$2"" -n ""--$1""}' | bash
+# or
+echo ""apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: updated-quota
+spec:
+  hard:
+    pods: 100
+  namespace: team-a-dev"" | kubectl apply -f -
+```
+
+## Verification
+Confirm the original workload can be restarted and check the ResourceQuota usage.
+
+```sh
+kubectl apply -f <(echo ""apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: app-w-zbda
+  namespace: team-a-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app-w-zbda
+  template:
+    metadata:
+      labels:
+        app: app-w-zbda
+    spec:
+      containers:
+      - name: server
+        image: ghcr.io/acme/worker:latest
+      restartPolicy: Always"")
+kubectl get pods
+kubectl get resourcequota/team-a-dev
+```
+
+## Rollback Guidance
+If increasing the quota or deleting pods causes issues, revert the changes:
+
+```sh
+# Revert deletion of pods
+kubectl get pods | grep '0/1' | cut -d' ' -f1,2 | uniq | awk '{print """,0.79853755,0.8812217,0.8378446,0.461038961038961,0.2352941176470588,0.33116883116883117,0.14320573692885463
+5,oomkilled_limit_too_low,oomkilled_limit_too_low,1,1.0,0.41304347826086957,0.0,"## Diagnosis
+Container is repeatedly OOMKilled because its memory limit is too low.
+
+## Fix Plan
+Increase the memory limit from `256Mi` to something more realistic such as `512Mi`.
+Adjust the memory request as needed to match application behavior.
+Restart the workload and verify restarts stop increasing in `default`.
+
+## Actions
+[kubectl_patch_resources] kubectl -n default patch deployment/processor-w-ndhp --type merge -p '<resources patch>'
+[kubectl_rollout_restart] kubectl -n default rollout restart deployment/processor-w-ndhp
+[validate] kubectl -n default get pods && kubectl -n default describe pod processor-w-ndhp-pod-anaz
+
+## Verification
+Pod Ready; restarts stop increasing.
+
+## Rollback
+Restore the previous memory limit `2Gi` if the new value is incorrect and investigate memory usage.","## Diagnosis
+Pod is crashing because of OOMKilled (memory limit 256Mi) due to large dataset loading in memory and insufficient memory for processing.
+
+## Fix Plan
+Increase memory limit to handle larger dataset and allow processing without OOM errors.
+
+## Remediation Steps
+1. Set memory request and limit to 512Mi to avoid OOMKills.
+2. Apply changes to workload.
+
+## Concrete Actions/Commands
+```bash
+kubectl patch pod processor-w-ndhp-pod-anaz -p '[{""op"": ""add"", ""path"": ""/spec/containers/0/resources"", ""value"": {""requests"": {""memory"": ""512Mi""}, ""limits"": {""memory"": ""512Mi""}}}]'
+```
+
+## Verification
+Check that the container has restarted successfully and is not OOMKilled.
+
+```bash
+kubectl get pod processor-w-ndhp-pod-anaz
+```
+Look for `READY: True` and `STATUS: Running`.
+
+Check container logs for successful startup and processing.
+
+```bash
+kubectl logs processor-w-ndhp-pod-anaz
+```
+Expected output:
+```
+2026-03-20T05:49:50Z INFO starting processor-w-ndhp
+2026-03-20T05:49:54Z INFO loading dataset into memory
+2026-03-20T05:49:59Z INFO processing batch size=50000
+```
+
+## Rollback Guidance
+If the fix causes issues, roll back to previous configuration.
+
+```bash
+kubectl patch pod processor-w-ndhp-pod-anaz -p '[{""op"": ""add"", ""path"": ""/spec/containers/0/resources"", ""value"": {""requests"": {""memory",0.8223774,0.86527395,0.84328043,0.39344262295081966,0.11221122112211221,0.26229508196721313,0.04524287997991952
+6,imagepull_registry_auth,rbac_forbidden,0,1.0,0.29545454545454547,0.0,"## Diagnosis
+Image pull fails due to missing or invalid registry credentials (unauthorized).
+
+## Fix Plan
+Create or repair imagePullSecret `registry-creds` in `ml`.
+Reference it from the ServiceAccount or Pod spec.
+Recreate or restart the workload and verify the image pull succeeds.
+
+## Actions
+[kubectl_create_registry_secret] kubectl -n ml create secret docker-registry registry-creds --docker-server=... --docker-username=... --docker-password=REDACTED
+[kubectl_patch_sa] kubectl -n ml patch serviceaccount default -p '{""imagePullSecrets"":[{""name"":""registry-creds""}]}'
+[validate] kubectl -n ml get pods
+
+## Verification
+Pod Ready in `ml`; no unauthorized image pull errors remain.
+
+## Rollback
+Remove the incorrect imagePullSecret reference or restore the previous working credential.","## Diagnosis
+Pod cannot pull the Docker image because it lacks permissions to access the private repository `ghcr.io/acme/private-api:latest`.
+
+## Fix Plan
+Grant the necessary Kubernetes service account (SA) access to the Docker registry.
+
+## Actions
+Update the workload's service account with `pull` permission for the Docker registry.
+
+```yaml
+apiVersion: apps.v1
+kind: Deployment
+metadata:
+  name: app-w-rk74
+  namespace: ml
+spec:
+  template:
+    spec:
+      serviceAccount: app-w-rk74-sa
+      containers:
+      - name: app-w-rk74-svc
+        image: ghcr.io/acme/private-api:latest
+        resources: {}
+```
+
+Apply the fix:
+
+```sh
+kubectl patch deployment app-w-rk74 -p '{
+  ""spec"": {
+    ""template"": {
+      ""spec"": {
+        ""serviceAccount"": ""app-w-rk74-sa"",
+        ""containers"": [
+          {
+            ""name"": ""app-w-rk74-svc"",
+            ""image"": ""ghcr.io/acme/private-api:latest""
+          }
+        ]
+      }
+    }
+  }
+}'
+```
+
+## Verification
+Verify the image pulls successfully and the pod starts.
+
+```sh
+kubectl get pod
+```
+
+Expected output:
+```
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-rk74-pod-oiqo	1/1	Running	0	5m
+```
+
+## Rollback Guidance
+If rolling back, reset the service account to its previous state.
+
+```sh
+kubectl patch deployment app-w-rk74 -p '{
+  ""spec"": {
+    ""template"": {
+      ""spec"": {
+        ""serviceAccount"": ""app-w-rk74-sa"",
+        ""containers",0.76452255,0.8319142,0.7967959,0.3250883392226149,0.056939501779359435,0.16254416961130744,0.08628512126434025
+7,liveness_probe_failure,liveness_probe_failure,1,1.0,0.28205128205128205,0.0,"## Diagnosis
+Container is repeatedly restarted because the liveness probe fails before the application can respond successfully.
+
+## Fix Plan
+Review the liveness probe path, port, timeout, and initial delay.
+Investigate application slowness, dependency latency, or resource pressure.
+Apply probe tuning and verify restarts stop increasing.
+
+## Actions
+[kubectl_edit_workload] kubectl -n staging edit deployment/backend-w-9e1m
+[validate] kubectl -n staging get pods
+
+## Verification
+Restarts stop increasing; pod Ready.
+
+## Rollback
+Undo the liveness probe changes if they make failure detection too weak.","## Diagnosis
+Pod is crashing back because the container exited with `Exit Code: 1`. Liveness probe is failing due to health check endpoint (`http://10.0.0.12:8080/healthz`) being slow.
+
+## Fix Plan
+Increase the restart delay and the number of retries for the liveness probe to avoid false failures.
+
+## Remediation Steps
+Update the pod's liveness probe configuration to increase the interval and retry count.
+
+## Verification
+Resubmit the command to update the liveness probe and verify that the issue is resolved by checking the `kubectl get pods` output.
+
+## Rollback Guidance
+If the fix causes issues, roll back to the previous configuration by setting the liveness probe to its original values.
+
+### Actions
+```bash
+# Update the liveness probe configuration
+kubectl patch pod backend-w-9e1m-pod-r8yz -p='{""spec"":{""template"":{""spec"":{""containers"":[{""name"":""backend-w-9e1m-core"",""livenessProbe"":{""exec"":{""command"":[""curl"",""-f"",""http://app.healthz""]},""initialDelaySeconds"":15,""timeoutSeconds"":10,""successThreshold"":1,""failureThreshold"":3}}]}}}'
+```
+
+### Verification
+```bash
+# Check the updated pod configuration
+kubectl get pod backend-w-9e1m-pod-r8yz -o yaml | grep livenessProbe
+
+# Observe the pod recovery
+kubectl get pod backend-w-9e1m-pod-r8yz
+```
+
+### Rollback
+```bash
+# Revert the liveness probe configuration to original values
+kubectl patch pod backend-w-9e1m-pod-r8yz -p='{""spec"":{""template"":{""spec"":{""containers"":[{""name"":""backend-w-9e1m-core"",""livenessProbe"":{""exec"":{""command"":[""curl",0.8079029,0.8719048,0.83868456,0.27027027027027023,0.0816326530612245,0.2027027027027027,0.04041029603778466
+8,oomkilled_limit_too_low,oomkilled_limit_too_low,1,1.0,0.43478260869565216,0.0,"## Diagnosis
+Container is repeatedly OOMKilled because its memory limit is too low.
+
+## Fix Plan
+Increase the memory limit from `256Mi` to something more realistic such as `512Mi`.
+Adjust the memory request as needed to match application behavior.
+Restart the workload and verify restarts stop increasing in `payments`.
+
+## Actions
+[kubectl_patch_resources] kubectl -n payments patch deployment/component-w-ei30 --type merge -p '<resources patch>'
+[kubectl_rollout_restart] kubectl -n payments rollout restart deployment/component-w-ei30
+[validate] kubectl -n payments get pods && kubectl -n payments describe pod component-w-ei30-pod-s3sj
+
+## Verification
+Pod Ready; restarts stop increasing.
+
+## Rollback
+Restore the previous memory limit `256Mi` if the new value is incorrect and investigate memory usage.","## Diagnosis
+Pod is crashing because the container was OOMKilled (memory limit 256Mi), and it keeps restarting due to errors.
+
+## Fix Plan
+Increase the memory limit to allow more resources for the workload.
+
+## Remediation Steps
+1. Set memory request and limit to a higher value (e.g., request=512Mi, limit=1Gi).
+2. Apply the change to the Kubernetes configuration.
+
+## Concrete Actions/Commands
+```bash
+kubectl patch pod component-w-ei30-pod-s3sj -p '[{""op"": ""add"", ""path"": ""/spec/containers/0/resources"", ""value"": {""requests"": {""memory"": ""512Mi""}, ""limits"": {""memory"": ""1Gi""}}}]'
+```
+
+## Verification
+Check that the pod has restarted successfully with the new resource limits.
+
+```bash
+kubectl get pod component-w-ei30-pod-s3sj -o yaml | grep restarts
+```
+Look for `restarts: 0` in the output, indicating no further crashes.
+
+## Rollback Guidance
+If the fix causes issues, roll back to the previous configuration.
+
+```bash
+kubectl patch pod component-w-ei30-pod-s3sj -p '[{""op"": ""add"", ""path"": ""/spec/containers/0/resources"", ""value"": {""requests"": {""memory"": ""128Mi""}, ""limits"": {""memory"": ""256Mi""}}}]'
+```
+Monitor the pod for stability before fully applying the rollback.",0.83934104,0.87043464,0.85460514,0.46478873239436624,0.1631205673758865,0.3028169014084507,0.0717841600731407
+9,pvc_pending_missing_storageclass,pvc_pending_missing_storageclass,1,1.0,0.3783783783783784,0.0,"## Diagnosis
+Pod is Pending because PVC `model-checkpoints` is unbound; no valid StorageClass is available to provision storage.
+
+## Fix Plan
+Ensure a valid StorageClass exists and the PVC references it correctly, or provision a matching PV.
+Verify PVC `model-checkpoints` becomes Bound.
+Confirm the Pod becomes Running and Ready in `observability`.
+
+## Actions
+[kubectl_get_storageclass] kubectl get storageclass
+[kubectl_get_pvc] kubectl -n observability get pvc model-checkpoints
+[kubectl_patch_pvc] kubectl -n observability patch pvc model-checkpoints -p '{""spec"":{""storageClassName"":""standard""}}'
+[validate] kubectl -n observability get pvc && kubectl -n observability get pods
+
+## Verification
+PVC `model-checkpoints` Bound; pod Running and Ready in `observability`.
+
+## Rollback
+Undo the PVC storageClass change if it points to the wrong class.","## Diagnosis
+Pod cannot schedule because it references a PersistentVolumeClaim (PVC) named `model-checkpoints` without a defined StorageClass.
+
+## Fix Plan
+Create a StorageClass for `standard` if missing, or remove the PVC reference from the Pod if not needed.
+
+## Actions
+Assuming `standard` StorageClass is required, create it.
+
+```yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: standard
+provisioner: kubernetes.io/aws-ebs
+parameters:
+  type: gp2
+```
+
+Apply the StorageClass:
+
+```bash
+kubectl apply -f path/to/standard-sc.yaml
+```
+
+Update the Pod to reference the new StorageClass:
+
+```yaml
+spec:
+  template:
+    spec:
+      containers:
+      - name: main
+        image: docker.io/acme/api:1.13.22
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: model-checkpoints
+      restartPolicy: Always
+```
+
+Apply the updated Pod configuration:
+
+```bash
+kubectl apply -f path/to/app-w-kyna-pod.yaml
+```
+
+## Verification
+Check that the Pod can schedule successfully:
+
+```bash
+kubectl get pods
+```
+
+Expected output:
+
+```text
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-kyna-pod-x8yf	1/1	Running	0	<seconds>
+```
+
+Verify the events:
+
+```bash
+kubectl get events
+```
+
+Expected output:
+
+```text
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+
+about a minute ago	Normal	Scheduled	pod/app-w-kyna-pod-x8yf	Work queue item became active
+```
+
+## Rollback Guidance
+If the fix causes issues, roll back to the previous state:
+
+```bash",0.7830227,0.83778906,0.8094806,0.3018867924528301,0.0759493670886076,0.20754716981132074,0.053063760722537795
+10,crashloop_bad_args,crashloop_bad_args,1,0.8,0.40540540540540543,0.0,"## Diagnosis
+Container starts but exits immediately because the workload passes invalid args (`--config=/nope.yaml`), causing CrashLoopBackOff.
+
+## Fix Plan
+Correct the container args or command in the workload spec.
+Apply the change and restart the workload.
+Verify restarts stop increasing and the Pod becomes Ready in `default`.
+
+## Actions
+[kubectl_get_workload] kubectl -n default get deployment/service-w-vqru -o yaml
+[kubectl_edit_workload] kubectl -n default edit deployment/service-w-vqru
+[kubectl_rollout_restart] kubectl -n default rollout restart deployment/service-w-vqru
+[validate] kubectl -n default get pods
+
+## Verification
+Restarts stop increasing; pod Ready.
+
+## Rollback
+Undo the args or command change if it breaks startup further.","## Diagnosis
+Pod is crashing back because `service-w-vqru-core` container exits with code 2 (configuration error). Workload keeps restarting the container due to invalid arguments (`--config=/nope.yaml`).
+
+## Fix Plan
+Update the configuration file path to the correct location.
+
+## Actions
+Update the `command` field in `spec.template.spec.containers[0].args` to point to the correct YAML config file.
+
+```bash
+kubectl patch pod/service-w-vqru-pod-gl8i -p '{
+  ""spec"": {
+    ""containers"": [
+      {
+        ""name"": ""service-w-vqru-core"",
+        ""args"": [""--config=/correct.yaml""]
+      }
+    ]
+  }
+}'
+```
+
+## Verification
+Check that the container starts successfully and stops crashing.
+
+```bash
+# Wait for restart
+sleep 60
+
+# Check pod status
+kubectl get pod service-w-vqru-pod-gl8i -o jsonpath='{.status.containerStatuses[0].stateỳ
+user
+Continue the verification step.",0.82656765,0.85595936,0.84100676,0.43171806167400884,0.13333333333333333,0.2643171806167401,0.11637020074508041
+11,imagepull_registry_auth,imagepull_registry_auth,1,1.0,0.4666666666666667,0.0,"## Diagnosis
+Image pull fails due to missing or invalid registry credentials (unauthorized).
+
+## Fix Plan
+Create or repair imagePullSecret `registry-creds` in `observability`.
+Reference it from the ServiceAccount or Pod spec.
+Recreate or restart the workload and verify the image pull succeeds.
+
+## Actions
+[kubectl_create_registry_secret] kubectl -n observability create secret docker-registry registry-creds --docker-server=... --docker-username=... --docker-password=REDACTED
+[kubectl_patch_sa] kubectl -n observability patch serviceaccount default -p '{""imagePullSecrets"":[{""name"":""registry-creds""}]}'
+[validate] kubectl -n observability get pods
+
+## Verification
+Pod Ready in `observability`; no unauthorized image pull errors remain.
+
+## Rollback
+Remove the incorrect imagePullSecret reference or restore the previous working credential.","## Diagnosis
+Pod cannot pull the Docker image because it lacks permissions to access the private repository `ghcr.io/acme/private-api:3.3.3`.
+
+## Fix Plan
+Grant the `observability` namespace access to the `ghcr.io/acme/private-api` repository by creating a secret with credentials or updating an existing one.
+
+## Actions
+Create a new secret with credentials for the private Docker registry:
+
+```shell
+kubectl create secret docker-image acme-registry \
+  --docker-server=ghcr.io \
+  --docker-username=<username> \
+  --docker-password=<password> \
+  --namespace=observability
+```
+
+Update the workload's imagePullSecrets to use the new secret:
+
+```shell
+kubectl patch deployment app-w-2dl1 -p '[{""op"": ""add"", ""path"": ""/spec/template/spec/imagePullSecrets/0/name"", ""value"": ""acme-registry""}]' -n observability
+```
+
+## Verification
+Verify the pod starts successfully:
+
+```shell
+kubectl get pods -n observability
+```
+
+Check the pod status should be `Running`:
+
+```text
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-2dl1-pod-h3ae	1/1	Running	0	<seconds>
+```
+
+## Rollback Guidance
+If the fix causes issues, roll back to the previous state:
+
+```shell
+# Revert imagePullSecrets
+kubectl patch deployment app-w-2dl1 -p '[{""op"": ""remove"", ""path"": ""/spec/template/spec/imagePullSecrets/0""}]' -n observability
+
+# Delete the temporary secret
+kubectl delete secret acme-registry -n observability
+```",0.8200333,0.8622985,0.840635,0.44295302013422816,0.12162162162162161,0.2550335570469799,0.060908566354026486
+12,failedscheduling_insufficient_cpu,service_connection_refused,0,0.8,0.525,0.0,"## Diagnosis
+Pod cannot schedule because its CPU request exceeds the available node capacity (Insufficient cpu).
+
+## Fix Plan
+Reduce the CPU request to a realistic value such as `500m`, or add nodes with more CPU.
+Apply the resource change and let the scheduler retry placement.
+Verify the Pod becomes Running and Ready in `default`.
+
+## Actions
+[kubectl_patch_resources] kubectl -n default patch deployment/service-w-mmti --type merge -p '<resources patch>'
+[validate] kubectl -n default get pods
+
+## Verification
+Pod scheduled and Running in `default`.
+
+## Rollback
+Restore the original CPU request if the reduced value is incorrect.","## Diagnosis
+Pod cannot schedule because its CPU request exceeds the available node capacity (Insufficient cpu).
+
+## Fix Plan
+Reduce the CPU request to a reasonable value.
+
+## Commands
+Update the pod's CPU request.
+
+```shell
+kubectl patch pod service-w-mmti-pod-d28y -p '{""spec"": {""resources"": {""limits"": {""cpu"": ""250m""}, ""requests"": {""cpu"": ""250m""}}}}'
+```
+
+## Verification
+Confirm the pod scheduled successfully.
+
+```shell
+kubectl get pod service-w-mmti-pod-d28y
+```
+
+Expected output:
+```shell
+pod/service-w-mmti-pod-d28y	1/1	Ready	0	10m
+```
+
+Check event logs for successful scheduling.
+
+```shell
+kubectl describe pod service-w-mmti-pod-d28y
+```
+
+Expected events:
+```
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+
+5s	Normal	Scheduled	default/pod/service-w-mmti-pod-d28y
+```
+
+Verify container is running.
+
+```shell
+kubectl get pod service-w-mmti-pod-d28y
+```
+
+Expected output:
+```shell
+pod/service-w-mmti-pod-d28y	1/1	Ready	True	10m
+```
+
+## Rollback Guidance
+If rolling back, increase the CPU request/limit to the original value.
+
+```shell
+kubectl patch pod service-w-mmti-pod-d28y -p '{""spec"": {""resources"": {""limits"": {""cpu"": ""500m""}, ""requests"": {""cpu"": ""500m""}}}}'
+```
+
+Re-check scheduling and verify the pod can resume normal operation.
+
+```shell
+kubectl get pod service-w-mmti-pod-d28",0.81274366,0.8736483,0.8420962,0.43356643356643354,0.22535211267605632,0.31468531468531463,0.13159640093251318
+13,imagepull_bad_tag,liveness_probe_failure,0,1.0,0.43243243243243246,0.0,"## Diagnosis
+Pod cannot start because image `docker.io/acme/service:2.9.10-typo` does not exist in the registry (manifest unknown).
+
+## Fix Plan
+Update the image tag from `2.9.10-typo` to a valid tag such as `2.9.10`.
+Apply the change and wait for a new Pod to pull the corrected image.
+Verify the Pod becomes Ready in `payments-t-1o`.
+
+## Actions
+[kubectl_set_image] kubectl -n payments-t-1o set image deployment/app-w-i9ji app-w-i9ji-svc=docker.io/acme/service:2.9.10
+[validate] kubectl -n payments-t-1o get pods && kubectl -n payments-t-1o get events --sort-by=.lastTimestamp
+
+## Verification
+Pod Ready in `payments-t-1o`; image pulls successfully.
+
+## Rollback
+Set the image back to the last known good tag if the replacement is wrong.","## Diagnosis
+Pod cannot pull the image `docker.io/acme/service:2.9.10-typo` because it does not exist (no such manifest).
+
+## Fix Plan
+Change the image version to `2.9.10` (remove the typo) and restart the pod.
+
+## Actions/Commands
+```shell
+kubectl patch pod app-w-i9ji-pod-bh38 -p '{""spec"": {""containers"": [{""name"": ""app-w-i9ji-svc"", ""image"": ""docker.io/acme/service:2.9.10""}]}}'
+```
+
+## Verification
+Check that the pod starts successfully with the correct image version.
+```shell
+kubectl get pod app-w-i9ji-pod-bh38
+```
+Look for `READY: 1/1` and `STATUS: Running`.
+
+## Rollback Guidance
+If rolling back to `2.9.10-typo` causes issues, revert to the original image version `2.9.10`.
+```shell
+kubectl patch pod app-w-i9ji-pod-bh38 -p '{""spec"": {""containers"": [{""name"": ""app-w-i9ji-svc"", ""image"": ""docker.io/acme/service:2.9.10-typo""}]}}'
+```",0.8693549,0.8835786,0.87640905,0.5559566787003611,0.2763636363636363,0.38267148014440433,0.2071168353019639
+14,liveness_probe_failure,liveness_probe_failure,1,0.8,0.3076923076923077,0.0,"## Diagnosis
+Container is repeatedly restarted because the liveness probe fails before the application can respond successfully.
+
+## Fix Plan
+Review the liveness probe path, port, timeout, and initial delay.
+Investigate application slowness, dependency latency, or resource pressure.
+Apply probe tuning and verify restarts stop increasing.
+
+## Actions
+[kubectl_edit_workload] kubectl -n logging-7 edit deployment/backend-w-36gi
+[validate] kubectl -n logging-7 get pods
+
+## Verification
+Restarts stop increasing; pod Ready.
+
+## Rollback
+Undo the liveness probe changes if they make failure detection too weak.","## Diagnosis
+Pod is crashing back because the container exited with code 1. Liveness probe is failing due to health check endpoint (`http://10.0.0.12:8080/healthz`) being slow or unresponsive.
+
+## Fix Plan
+Update the image to the latest version to fix any known issues. Increase the restart delay to avoid false positives.
+
+## Remediation Steps
+1. Identify the latest image version.
+2. Update the `pod`'s `container` spec with the new image version.
+3. Apply the change.
+
+## Commands
+```shell
+kubectl get images acme/component
+# Check for the latest image version
+
+NEW_IMAGE_VERSION=$(kubectl get images acme/component | tail -n1 | cut -d' ' -f1)
+# Set NEW_IMAGE_VERSION to the latest version
+
+kubectl patch pod backend-w-36gi-pod-ex12 -p '{""spec"": {""containers"": [{""name"": ""main"", ""image"": ""'$NEW_IMAGE_VERSION'""}}}'
+```
+
+## Verification
+Check that the pod is running and liveness probe passes.
+
+```shell
+kubectl get pod backend-w-36gi-pod-ex12
+# Verify Ready=True
+
+kubectl describe pod backend-w-36gi-pod-ex12
+# Look for ""Unhealthy"" or ""Killing"" events; they should not appear
+```
+
+## Rollback Guidance
+If issues arise after applying the fix, roll back to the previous version.
+
+```shell
+OLD_IMAGE_VERSION=$(kubectl get pod backend-w-36gi-pod-ex12 -o jsonpath='{.spec.containers[0].image}')
+kubectl patch pod backend-w-36gi-pod-ex12 -p '{""spec"": {""containers"": [{""name"": ""main"", ""image"": ""'$OLD_IMAGE_VERSION'""}}}'
+```",0.80107856,0.8638014,0.8312584,0.2508250825082508,0.046511627906976744,0.15841584158415842,0.030497674333506686
+15,failedscheduling_insufficient_memory,failedscheduling_insufficient_memory,1,1.0,0.5128205128205128,0.0,"## Diagnosis
+Pod cannot schedule because its memory request exceeds the available node capacity (Insufficient memory).
+
+## Fix Plan
+Reduce the memory request to a realistic value such as `1Gi`, or add nodes with more memory.
+Apply the resource change and let the scheduler retry placement.
+Verify the Pod becomes Running and Ready in `apps`.
+
+## Actions
+[kubectl_patch_resources] kubectl -n apps patch deployment/backend-w-2f9o --type merge -p '<resources patch>'
+[validate] kubectl -n apps get pods
+
+## Verification
+Pod scheduled and Running in `apps`.
+
+## Rollback
+Restore the original resource request if the reduced memory value is insufficient.","## Diagnosis
+Pod cannot schedule because its memory request exceeds the available node capacity (Insufficient memory).
+
+## Fix Plan
+Reduce the memory request to a reasonable value that fits on a node.
+
+## Actions
+Set the memory request lower, e.g., `512Mi` instead of the default `256Mi`.
+
+```bash
+kubectl edit pod backend-w-2f9o-pod-izti -n apps
+```
+or
+```bash
+kubectl patch pod backend-w-2f9o-pod-izti -n apps -p='{""spec"": {""containers"": [{""name"": ""backend-w-2f9o-c"", ""resources"": {""request"": {""memory"": ""512Mi""}}}]}}'
+```
+
+## Verification
+Check that the pod scheduled successfully:
+
+```bash
+kubectl get pod backend-w-2f9o-pod-izti -n apps
+```
+Look for `STATUS: Running`.
+
+Check event logs for successful scheduling:
+
+```bash
+kubectl get events -n apps
+```
+Look for `type: Success` events.
+
+## Rollback Guidance
+If rolling back changes causes issues, set the memory request back to `256Mi`:
+
+```bash
+kubectl patch pod backend-w-2f9o-pod-izti -n apps -p='{""spec"": {""containers"": [{""name"": ""backend-w-2f9o-c"", ""resources"": {""request"": {""memory"": ""256Mi""}}}]}}'
+```",0.83546305,0.88855004,0.8611892,0.5000000000000001,0.24799999999999997,0.380952380952381,0.15604382756609642
+16,crashloop_bad_args,service_connection_refused,0,1.0,0.43243243243243246,0.0,"## Diagnosis
+Container starts but exits immediately because the workload passes invalid args (`--port=notanint`), causing CrashLoopBackOff.
+
+## Fix Plan
+Correct the container args or command in the workload spec.
+Apply the change and restart the workload.
+Verify restarts stop increasing and the Pod becomes Ready in `monitoring-t-pb`.
+
+## Actions
+[kubectl_get_workload] kubectl -n monitoring-t-pb get deployment/module-w-uzxa -o yaml
+[kubectl_edit_workload] kubectl -n monitoring-t-pb edit deployment/module-w-uzxa
+[kubectl_rollout_restart] kubectl -n monitoring-t-pb rollout restart deployment/module-w-uzxa
+[validate] kubectl -n monitoring-t-pb get pods
+
+## Verification
+Restarts stop increasing; pod Ready.
+
+## Rollback
+Undo the args or command change if it breaks startup further.","## Diagnosis
+Pod is crashing because `module-w-uzxa-core` container fails to start due to invalid argument `--port=notanint`.
+
+## Fix Plan
+Update the `module-w-uzxa` workload configuration to use a valid port number.
+
+## Actions
+Update the `module-w-uzxa` deployment configuration to use a valid port number.
+
+```shell
+kubectl edit deployment/module-w-uzxa
+```
+
+Set `command` to `[""python"", ""app.py""]` and `args` to `[""--port=8080""]`.
+
+## Verification
+Verify the fix by checking the pod status and container logs.
+
+```shell
+kubectl get pod
+kubectl get event
+kubectl logs module-w-uzxa-pod-eulu
+```
+
+Check that the `container` is running without errors and `READY` is `True`.
+
+## Rollback Guidance
+If the change causes issues, roll back to the previous configuration.
+
+```shell
+kubectl patch deployment module-w-uzxa -p '{""spec"": {""containers"": [{""name"": ""module-w-uzxa-core"", ""image"": ""ghcr.io/acme/service:latest""}]}}'
+```
+Set `command` and `args` back to their original values.",0.84943324,0.8601297,0.854748,0.43181818181818177,0.1297709923664122,0.23484848484848486,0.0901916421378575
+17,pvc_not_found_mountfail,pvc_not_found_mountfail,1,1.0,0.425,0.0,"## Diagnosis
+Pod cannot mount volume because PVC `missing-pvc-n13j` does not exist in `apps-1` (FailedMount).
+
+## Fix Plan
+Create PVC `missing-pvc-n13j` or update the workload to use an existing PVC.
+Recreate or restart the workload after the claim reference is corrected.
+Verify the Pod becomes Running and Ready in `apps-1`.
+
+## Actions
+[kubectl_get_pvc] kubectl -n apps-1 get pvc
+[kubectl_apply_pvc] kubectl -n apps-1 apply -f pvc.yaml  # name=missing-pvc-n13j
+[validate] kubectl -n apps-1 get pvc && kubectl -n apps-1 describe pod component-w-4ir8-pod-x3oz
+
+## Verification
+No FailedMount remains; pod Running and Ready in `apps-1`.
+
+## Rollback
+Delete the wrongly created PVC and restore the correct claim reference if needed.","## Diagnosis
+Pod cannot mount volume because PVC `missing-pvc-n13j` does not exist.
+
+## Fix Plan
+Create missing PVC `missing-pvc-n13j`.
+
+## Actions
+Create PVC `missing-pvc-n13j` with access mode `SingleNodeReadOnly`.
+
+```shell
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: missing-pvc-n13j
+spec:
+  accessModes:
+    - ReadOnly
+  resources:
+    requests:
+      storage: 8Gi
+EOF
+```
+
+## Verification
+Verify PVC `missing-pvc-n13j` exists and check that the pod can mount it successfully.
+
+```shell
+# Check PVC was created
+kubectl get pvc missing-pvc-n13j
+
+# Check pod status
+kubectl get pod component-w-4ir8-pod-x3oz
+```
+
+## Rollback Guidance
+If the PVC creation causes issues, delete the PVC and inspect the logs.
+
+```shell
+# Remove problematic PVC
+kubectl delete pvc missing-pvc-n13j
+
+# Inspect pod logs
+kubectl logs component-w-4ir8-pod-x3oz
+```",0.8644594,0.8628403,0.8636491,0.5,0.27642276422764234,0.3709677419354839,0.20886704272423726
+18,nodeselector_mismatch,imagepull_bad_tag,0,1.0,0.4594594594594595,0.0,"## Diagnosis
+Pod cannot schedule because its nodeSelector or affinity does not match any nodes.
+
+## Fix Plan
+Remove or correct the nodeSelector or node affinity so it matches real node labels.
+Apply the change and allow the scheduler to place the Pod.
+Verify the Pod becomes Running and Ready in `staging-stg`.
+
+## Actions
+[kubectl_get_nodes] kubectl get nodes --show-labels
+[kubectl_edit_workload] kubectl -n staging-stg edit deployment/component-w-099m
+[validate] kubectl -n staging-stg get pods
+
+## Verification
+Pod scheduled and Running in `staging-stg`.
+
+## Rollback
+Restore the previous selector or affinity if it was required for correct placement.","## Diagnosis
+Pod cannot schedule because its nodeSelector or affinity does not match any nodes.
+
+## Fix Plan
+Update nodeSelector or affinity to match existing nodes.
+
+## Actions
+Edit Pod specification to set correct nodeSelector or affinity.
+
+```bash
+kubectl edit pod component-w-099m-pod-zbc2
+```
+
+Set `spec.nodeSelector` or `spec.affinity` to align with available nodes.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: component-w-099m-pod-zbc2
+  namespace: staging-stg
+spec:
+  containers:
+  - name: main
+    image: docker.io/acme/app:0.3.29
+  nodeSelector:  # Add or update this field
+    role: worker
+```
+
+## Verification
+Check Pod rescheduling and confirm it starts successfully.
+
+```bash
+kubectl get pod component-w-099m-pod-zbc2 -o yaml | grep ready
+```
+
+Expected output: `ready: True`
+
+Check Pod logs for errors.
+
+```bash
+kubectl get pod component-w-099m-pod-zbc2
+```
+
+Expected output: `containers: 1s since last heartbit`
+
+## Rollback Guidance
+If the fix causes issues, roll back to previous state.
+
+Identify changes made and reverse them.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: component-w-099m-pod-zbc2
+  namespace: staging-stg
+spec:
+  containers:
+  - name: main
+    image: docker.io/acme/app:0.3.29
+  # Remove or update incorrect nodeSelector
+```
+
+Revert using `kubectl patch` if needed.
+
+```bash
+kubectl patch pod component-w-099m-p",0.8174594,0.87155265,0.8436398,0.39867109634551495,0.17391304347826086,0.26578073089701,0.11534777413307333
+19,imagepull_registry_auth,createcontainerconfigerror_missing_secret,0,1.0,0.37777777777777777,0.0,"## Diagnosis
+Image pull fails due to missing or invalid registry credentials (unauthorized).
+
+## Fix Plan
+Create or repair imagePullSecret `registry-creds` in `sandbox-7`.
+Reference it from the ServiceAccount or Pod spec.
+Recreate or restart the workload and verify the image pull succeeds.
+
+## Actions
+[kubectl_create_registry_secret] kubectl -n sandbox-7 create secret docker-registry registry-creds --docker-server=... --docker-username=... --docker-password=REDACTED
+[kubectl_patch_sa] kubectl -n sandbox-7 patch serviceaccount default -p '{""imagePullSecrets"":[{""name"":""registry-creds""}]}'
+[validate] kubectl -n sandbox-7 get pods
+
+## Verification
+Pod Ready in `sandbox-7`; no unauthorized image pull errors remain.
+
+## Rollback
+Remove the incorrect imagePullSecret reference or restore the previous working credential.","## Diagnosis
+Pod cannot pull the Docker image because it lacks permissions to access the private repository `ghcr.io/acme/private-api:3.13.0`.
+
+## Fix Plan
+Grant the `sandbox-7` namespace access to the `ghcr.io/acme/private-api` repository.
+
+## Actions
+Add a secret with Docker credentials to the `sandbox-7` namespace and update the pod's container specification to reference the secret.
+
+```bash
+kubectl create secret docker-image ghcr-auth \
+  --docker-server=ghcr.io \
+  --docker-username=<username> \
+  --docker-password=<password> \
+  --namespace=sandbox-7
+```
+
+Update the pod configuration to use the secret:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: module-w-zwic
+spec:
+  template:
+    spec:
+      containers:
+      - name: module-w-zwic-c
+        image: ghcr.io/acme/private-api:3.13.0
+        imagePullSecrets:
+        - name: ghcr-auth
+```
+
+Apply the updated configuration:
+
+```bash
+kubectl apply -f path/to/updated/deployment.yaml
+```
+
+## Verification
+Check that the pod is running successfully:
+
+```bash
+kubectl get pod module-w-zwic-pod-bec5
+```
+
+Expected output:
+
+```text
+NAME	READY	STATUS	RESTARTS	AGE
+module-w-zwic-pod-bec5	1/1	Running	0	<seconds>
+```
+
+Verify the container is ready:
+
+```bash
+kubectl get pod module-w-zwic-pod-bec5 -o jsonpath='{.status.containerStatuses[0].ready}'
+```
+
+Expected output:
+
+```text
+true
+```
+
+## Rollback Guidance
+If the fix causes issues, roll back to the",0.7961938,0.84854126,0.82153445,0.3144654088050315,0.08860759493670886,0.2138364779874214,0.05106897612675201
