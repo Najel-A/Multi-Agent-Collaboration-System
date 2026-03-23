@@ -1,0 +1,87 @@
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: dp-clean-strict
+  namespace: dp-clean
+spec:
+  type: Python
+  mode: cluster
+  sparkVersion: "3.5.1"
+  image: spark:3.5.1-python3
+  imagePullPolicy: IfNotPresent
+
+  mainApplicationFile: local:///opt/spark/app/clean_strict.py
+  arguments:
+    - "--input"
+    - "s3a://mas-pipeline-prod/spark_data_processing/ingest_data/clean_data/good/"
+    - "--output"
+    - "s3a://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict/"
+    - "--bad_output"
+    - "s3a://mas-pipeline-prod/spark_data_processing/cleaning_data/clean_strict_bad/"
+
+  deps:
+    packages:
+      - org.apache.hadoop:hadoop-aws:3.3.4
+      - com.amazonaws:aws-java-sdk-bundle:1.12.262
+
+  sparkConf:
+    "spark.hadoop.fs.s3a.impl": "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    "spark.hadoop.fs.s3a.aws.credentials.provider": "com.amazonaws.auth.EnvironmentVariableCredentialsProvider"
+    "spark.hadoop.fs.s3a.endpoint.region": "us-west-2"
+    "spark.jars.ivy": "/tmp/.ivy2"
+    "spark.hadoop.fs.s3a.fast.upload": "true"
+    "spark.hadoop.fs.s3a.connection.maximum": "200"
+
+  restartPolicy:
+    type: Never
+
+  volumes:
+    - name: app-script
+      configMap:
+        name: dp-clean-script
+
+  driver:
+    cores: 1
+    memory: "1g"
+    serviceAccount: spark
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: aws-creds
+            key: AWS_ACCESS_KEY_ID
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: aws-creds
+            key: AWS_SECRET_ACCESS_KEY
+      - name: AWS_REGION
+        value: "us-west-2"
+      - name: AWS_DEFAULT_REGION
+        value: "us-west-2"
+    volumeMounts:
+      - name: app-script
+        mountPath: /opt/spark/app
+
+  executor:
+    instances: 2
+    cores: 1
+    memory: "1g"
+    env:
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef:
+            name: aws-creds
+            key: AWS_ACCESS_KEY_ID
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef:
+            name: aws-creds
+            key: AWS_SECRET_ACCESS_KEY
+      - name: AWS_REGION
+        value: "us-west-2"
+      - name: AWS_DEFAULT_REGION
+        value: "us-west-2"
+    volumeMounts:
+      - name: app-script
+        mountPath: /opt/spark/app

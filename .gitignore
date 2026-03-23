@@ -16,3 +16,6 @@ terraform.tfstate*
 # Misc
 Untitled
 __pycache__/
+clusters/elk-prod/.env
+clusters/monitoring-cluster-qa/.env
+testjobs

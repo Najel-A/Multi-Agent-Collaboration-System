@@ -1,0 +1,263 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dp-clean-script
+  namespace: dp-clean
+data:
+  clean_strict.py: |
+    import argparse
+    import re
+    import json
+    from pyspark.sql import SparkSession, functions as F, types as T
+
+    # -----------------------
+    # Labels / Families
+    # -----------------------
+    LABELS = [
+        "CrashLoopBackOff",
+        "OOMKilled",
+        "ImagePullError",
+        "FailedScheduling",
+        "LivenessProbeFailed",
+        "ReadinessProbeFailed",
+        "NodeNotReady",
+    ]
+    label2id = {l: i for i, l in enumerate(LABELS)}
+
+    FAMILY_LABELS = ["WorkloadCrash", "ImagePull", "SchedulingNode", "Probes"]
+    family2id = {l: i for i, l in enumerate(FAMILY_LABELS)}
+
+    def label_to_family(lbl: str) -> str:
+        if lbl in ["CrashLoopBackOff", "OOMKilled"]:
+            return "WorkloadCrash"
+        if lbl in ["ImagePullError"]:
+            return "ImagePull"
+        if lbl in ["FailedScheduling", "NodeNotReady"]:
+            return "SchedulingNode"
+        if lbl in ["LivenessProbeFailed", "ReadinessProbeFailed"]:
+            return "Probes"
+        raise ValueError(lbl)
+
+    # -----------------------
+    # Evidence extraction
+    # -----------------------
+    HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+
+    EVIDENCE_LINE_RE = re.compile(
+        r"(CrashLoopBackOff|Back-off restarting failed container|OOMKilled|out of memory|"
+        r"ErrImagePull|ImagePullBackOff|pull access denied|manifest unknown|failed to pull image|"
+        r"FailedScheduling|failed scheduling|0/\d+\s+nodes are available|Insufficient|No nodes are available|"
+        r"Readiness probe failed|Liveness probe failed|failed readiness probe|failed liveness probe|"
+        r"readinessProbe|livenessProbe|"
+        r"NodeNotReady|node.*not ready|kubelet.*not ready|NodeStatusUnknown|"
+        r"\bWarning\b|\bError\b|\bFailed\b)",
+        re.I
+    )
+
+    def basic_clean(text: str) -> str:
+        text = re.sub(HTML_COMMENT_RE, " ", text or "")
+        text = text.replace("```", "")
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    def extract_events_block(lines):
+        for i, ln in enumerate(lines):
+            if re.search(r"^\s*Events:\s*$", ln, re.I):
+                return [x.strip() for x in lines[i:i+140] if x.strip()]
+        return []
+
+    def extract_evidence_window(text: str, max_lines: int = 160, context: int = 2) -> str:
+        text = basic_clean(text)
+        lines = text.split("\n")
+
+        keep_idx = set()
+        for i, ln in enumerate(lines):
+            if EVIDENCE_LINE_RE.search(ln):
+                for j in range(max(0, i-context), min(len(lines), i+context+1)):
+                    keep_idx.add(j)
+
+        ev_lines = []
+        for i in sorted(keep_idx):
+            s = lines[i].strip()
+            if s:
+                ev_lines.append(s)
+
+        events = extract_events_block(lines)
+        if events:
+            ev_lines = events + ["---"] + ev_lines
+
+        seen = set()
+        final = []
+        for ln in ev_lines:
+            if ln not in seen:
+                seen.add(ln)
+                final.append(ln)
+
+        final = final[:max_lines]
+        out = "\n".join(final).strip()
+
+        if len(out) < 200:
+            out = "\n".join([x.strip() for x in lines[:min(120, len(lines))] if x.strip()]).strip()
+        return out
+
+    def label_has_required_evidence_strict(label: str, evidence: str) -> bool:
+        e = (evidence or "").lower()
+
+        if label == "CrashLoopBackOff":
+            return ("crashloopbackoff" in e) or ("back-off restarting failed container" in e)
+
+        if label == "OOMKilled":
+            return ("oomkilled" in e) or ("out of memory" in e) or ("oom" in e and "killed" in e)
+
+        if label == "ImagePullError":
+            return ("errimagepull" in e) or ("imagepullbackoff" in e) or ("failed to pull image" in e) or ("pull access denied" in e) or ("manifest unknown" in e)
+
+        if label == "FailedScheduling":
+            return ("failedscheduling" in e) or ("0/" in e and "nodes are available" in e) or ("insufficient" in e) or ("node(s) had taint" in e) or ("didn't match pod affinity" in e)
+
+        if label == "NodeNotReady":
+            return ("nodenotready" in e) or ("kubelet" in e and "not ready" in e) or ("node status unknown" in e) or ("node is not ready" in e)
+
+        if label == "LivenessProbeFailed":
+            return ("liveness probe failed" in e) or ("failed liveness probe" in e)
+
+        if label == "ReadinessProbeFailed":
+            return ("readiness probe failed" in e) or ("failed readiness probe" in e)
+
+        return True
+
+    # -----------------------
+    # UDF output schema
+    # -----------------------
+    out_schema = T.StructType([
+        T.StructField("evidence", T.StringType(), True),
+        T.StructField("label", T.StringType(), True),
+        T.StructField("label_id", T.IntegerType(), True),
+        T.StructField("family", T.StringType(), True),
+        T.StructField("family_id", T.IntegerType(), True),
+        T.StructField("drop_reason", T.StringType(), True),
+    ])
+
+    def normalize_label(label_raw: str) -> str:
+        if label_raw is None:
+            return None
+        s = str(label_raw).strip()
+
+        if s.startswith("{") and ("error_type" in s or "\"error\"" in s or "error" in s):
+            try:
+                obj = json.loads(s)
+                if isinstance(obj, dict):
+                    if obj.get("error_type"):
+                        s = str(obj["error_type"]).strip()
+                    elif obj.get("error"):
+                        s = str(obj["error"]).strip()
+            except Exception:
+                pass
+
+        for l in LABELS:
+            if l in s:
+                return l
+        return s
+
+    @F.udf(returnType=out_schema)
+    def clean_strict_udf(text: str, label_raw: str):
+        try:
+            if text is None or not str(text).strip():
+                return (None, None, None, None, None, "no_user_text")
+            if label_raw is None or not str(label_raw).strip():
+                return (None, None, None, None, None, "no_assistant_label")
+
+            label = normalize_label(label_raw)
+            if label not in label2id:
+                return (None, None, None, None, None, "unknown_label")
+
+            evidence = extract_evidence_window(str(text))
+            if not label_has_required_evidence_strict(label, evidence):
+                return (None, None, None, None, None, "no_strict_evidence")
+
+            fam = label_to_family(label)
+            return (
+                evidence,
+                label,
+                int(label2id[label]),
+                fam,
+                int(family2id[fam]),
+                None
+            )
+        except Exception:
+            return (None, None, None, None, None, "exception")
+
+    # -----------------------
+    # Main
+    # -----------------------
+    def main():
+        p = argparse.ArgumentParser()
+        p.add_argument("--input", required=True, help="s3a://.../good/ parquet prefix (contains split=...)")
+        p.add_argument("--output", required=True, help="s3a://.../clean_strict/ parquet output")
+        p.add_argument("--bad_output", required=True, help="s3a://.../clean_strict_bad/ json output")
+        args = p.parse_args()
+
+        spark = SparkSession.builder.appName("dp-clean-strict").getOrCreate()
+        spark.sparkContext.setLogLevel("WARN")
+
+        df = spark.read.parquet(args.input)
+
+        # Ensure split exists (it should, since ingest partitions by split)
+        if "split" not in df.columns:
+            # fallback: infer from source_file if needed
+            sf = F.lower(F.col("source_file"))
+            df = df.withColumn(
+                "split",
+                F.when(sf.contains("/train/"), F.lit("train"))
+                 .when(sf.contains("/val/"),   F.lit("val"))
+                 .when(sf.contains("/valid/"), F.lit("val"))
+                 .when(sf.contains("/test/"),  F.lit("test"))
+                 .otherwise(F.lit("unknown"))
+            )
+
+        # Spark-native extraction from array<struct<role,content>>
+        user_text = F.concat_ws(
+            "\n\n",
+            F.expr("transform(filter(messages, x -> x.role = 'user'), x -> x.content)")
+        )
+        label_raw = F.expr("element_at(transform(filter(messages, x -> x.role = 'assistant'), x -> x.content), -1)")
+
+        out = (df
+            .withColumn("text_extracted", user_text)
+            .withColumn("label_extracted", label_raw)
+            .withColumn("cleaned", clean_strict_udf(F.col("text_extracted"), F.col("label_extracted")))
+            .withColumn("run_date", F.current_date())
+            .select(
+                F.col("split"),
+                F.col("source_file"),
+                F.col("ingest_date"),
+                F.col("run_date"),
+                F.col("cleaned.evidence").alias("evidence"),
+                F.col("cleaned.label").alias("label"),
+                F.col("cleaned.label_id").alias("label_id"),
+                F.col("cleaned.family").alias("family"),
+                F.col("cleaned.family_id").alias("family_id"),
+                F.col("cleaned.drop_reason").alias("drop_reason"),
+            )
+        )
+
+        good = out.filter(F.col("drop_reason").isNull()).drop("drop_reason")
+        bad  = out.filter(F.col("drop_reason").isNotNull())
+
+        # Partition outputs by split so you keep train/val/test separation
+        (good.write
+            .mode("append")
+            .partitionBy("split", "run_date")
+            .parquet(args.output.rstrip("/")))
+
+        (bad.write
+            .mode("append")
+            .partitionBy("split", "run_date")
+            .json(args.bad_output.rstrip("/")))
+
+        spark.stop()
+
+    if __name__ == "__main__":
+        main()
