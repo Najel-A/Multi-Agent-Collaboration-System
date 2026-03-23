@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Relationship Diagrams — Multi-Agent Collaboration System</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #fff; color: #111; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; padding: 48px 24px; }
+
+  h1 { text-align: center; font-size: 1.9rem; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px; }
+  .subtitle { text-align: center; color: #666; font-size: 0.95rem; margin-bottom: 6px; }
+  .authors { text-align: center; color: #999; font-size: 0.78rem; margin-bottom: 40px; }
+
+  .diagram-section { max-width: 960px; margin: 0 auto 48px; }
+  .diagram-section h2 { font-size: 1.15rem; font-weight: 800; margin-bottom: 4px; }
+  .diagram-section .model-subtitle { font-size: 0.82rem; color: #666; margin-bottom: 14px; line-height: 1.55; }
+
+  /* Agent nodes */
+  .agent-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 4px; }
+  .agent { border-radius: 8px; padding: 12px 16px; min-width: 130px; max-width: 180px; flex: 1 1 130px; text-align: center; }
+  .agent .name { font-size: 0.82rem; font-weight: 700; margin-bottom: 2px; }
+  .agent .detail { font-size: 0.68rem; line-height: 1.4; }
+
+  /* Color schemes per model origin */
+  .agent.m1 { background: #f1f5f9; border: 1.5px solid #64748b; }
+  .agent.m1 .name { color: #334155; }
+  .agent.m1 .detail { color: #64748b; }
+
+  .agent.m2 { background: #eff6ff; border: 1.5px solid #2563eb; }
+  .agent.m2 .name { color: #1e40af; }
+  .agent.m2 .detail { color: #2563eb; }
+
+  .agent.m3 { background: #f5f3ff; border: 1.5px solid #7c3aed; }
+  .agent.m3 .name { color: #5b21b6; }
+  .agent.m3 .detail { color: #7c3aed; }
+
+  .agent.m4 { background: #fef2f2; border: 1.5px solid #dc2626; }
+  .agent.m4 .name { color: #991b1b; }
+  .agent.m4 .detail { color: #dc2626; }
+
+  .agent.shared { background: #f0fdf4; border: 1.5px solid #059669; }
+  .agent.shared .name { color: #065f46; }
+  .agent.shared .detail { color: #059669; }
+
+  .agent.human { background: #fef3c7; border: 1.5px solid #d97706; }
+  .agent.human .name { color: #92400e; }
+  .agent.human .detail { color: #b45309; }
+
+  .agent.new { border-width: 2.5px; }
+
+  /* Arrow rows between agent rows */
+  .arrow-row { display: flex; justify-content: center; align-items: center; margin: 2px 0; gap: 8px; }
+  .arrow-row svg { width: 22px; height: 22px; }
+  .arrow-label { font-size: 0.7rem; color: #888; font-style: italic; }
+
+  /* Horizontal flow */
+  .flow-row { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+  .flow-arrow { color: #444; font-size: 1rem; font-weight: bold; }
+  .flow-arrow.blue { color: #2563eb; }
+  .flow-arrow.purple { color: #7c3aed; }
+  .flow-arrow.red { color: #dc2626; }
+  .flow-arrow.green { color: #059669; }
+  .flow-arrow.orange { color: #ea580c; }
+
+  /* Decision diamond */
+  .decision { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border: 2px solid #ea580c; border-radius: 4px; transform: rotate(45deg); background: #fff; margin: 6px 14px; }
+  .decision span { transform: rotate(-45deg); font-size: 0.7rem; font-weight: 700; color: #ea580c; }
+
+  /* Bracket / grouping */
+  .group-box { border: 1.5px dashed #bbb; border-radius: 10px; padding: 14px 12px 10px; margin: 8px 0; position: relative; }
+  .group-label { position: absolute; top: -10px; left: 16px; background: #fff; padding: 0 8px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1.2px; color: #999; }
+
+  /* Pipeline box */
+  .pipeline { font-family: 'Courier New', monospace; font-size: 0.78rem; color: #333; line-height: 1.8; background: #f8f8f8; padding: 14px 16px; border-radius: 6px; overflow-x: auto; white-space: pre; border: 1px solid #e5e5e5; margin-top: 10px; }
+
+  /* Cost badge */
+  .cost { display: inline-block; font-size: 0.68rem; color: #059669; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 12px; padding: 2px 10px; margin-left: 8px; font-weight: 600; }
+
+  /* Divider */
+  .section-divider { border: none; border-top: 2px solid #e5e5e5; margin: 40px auto; max-width: 960px; }
+
+  /* Legend */
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; margin-bottom: 36px; padding: 10px 16px; max-width: 960px; margin-left: auto; margin-right: auto; border: 1px solid #e5e5e5; border-radius: 8px; background: #fafafa; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.72rem; color: #555; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid; }
+  .legend-dot.c-m1 { background: #f1f5f9; border-color: #64748b; }
+  .legend-dot.c-m2 { background: #eff6ff; border-color: #2563eb; }
+  .legend-dot.c-m3 { background: #f5f3ff; border-color: #7c3aed; }
+  .legend-dot.c-m4 { background: #fef2f2; border-color: #dc2626; }
+  .legend-dot.c-shared { background: #f0fdf4; border-color: #059669; }
+  .legend-dot.c-human { background: #fef3c7; border-color: #d97706; }
+
+  @media(max-width:700px){
+    .agent { min-width: 100px; max-width: 140px; padding: 8px 10px; }
+    h1 { font-size: 1.3rem; }
+    .diagram-section h2 { font-size: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Agent Relationship Diagrams</h1>
+<p class="subtitle">Information Flows &amp; Decision-Making &mdash; 4 Progressive Coordination Models</p>
+<p class="authors">DATA 298A/B &mdash; Akash Thiagarajan, Chelsea Jaculina, Devesh Singh, Mrunali Katta, Najel Alarcon</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot c-m1"></div> Model 1 agents</div>
+  <div class="legend-item"><div class="legend-dot c-m2"></div> Model 2 agents</div>
+  <div class="legend-item"><div class="legend-dot c-m3"></div> Model 3 agents</div>
+  <div class="legend-item"><div class="legend-dot c-m4"></div> Model 4 agents</div>
+  <div class="legend-item"><div class="legend-dot c-shared"></div> Shared resource</div>
+  <div class="legend-item"><div class="legend-dot c-human"></div> Human gate</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODEL 1 -->
+<!-- ============================================================ -->
+<div class="diagram-section">
+  <h2>Model 1 &mdash; Centralized Linear Pipeline <span class="cost">~$0 / incident</span></h2>
+  <p class="model-subtitle">6 agents. Sequential message passing. Each agent receives output from the previous and forwards to the next. Mistral-7B LoRA classifies root cause.</p>
+
+  <div class="agent-row">
+    <div class="agent m1"><div class="name">Data Ingestion</div><div class="detail">Collect K8s logs<br>Tier 1 &middot; Auto</div></div>
+  </div>
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#64748b"/></svg>
+    <span class="arrow-label">raw logs</span>
+  </div>
+  <div class="agent-row">
+    <div class="agent m1"><div class="name">Preprocessing</div><div class="detail">Parse, enrich, validate<br>Tier 1 &middot; Auto</div></div>
+  </div>
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#64748b"/></svg>
+    <span class="arrow-label">parsed data</span>
+  </div>
+  <div class="agent-row">
+    <div class="agent m1"><div class="name">Anomaly Detection</div><div class="detail">IF / SVM / LOF<br>Tier 1 &middot; Auto</div></div>
+  </div>
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#64748b"/></svg>
+    <span class="arrow-label">alerts</span>
+  </div>
+  <div class="agent-row">
+    <div class="agent m1"><div class="name">Planner Agent</div><div class="detail">Mistral-7B LoRA<br>RCA classification<br>Tier 2 &middot; Human review</div></div>
+  </div>
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#64748b"/></svg>
+    <span class="arrow-label">rca_plan</span>
+  </div>
+  <div class="agent-row">
+    <div class="agent m1"><div class="name">Executor Agent</div><div class="detail">kubectl + API calls<br>Tier 2-3 &middot; Human gate</div></div>
+  </div>
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#64748b"/></svg>
+    <span class="arrow-label">exec result</span>
+  </div>
+  <div class="agent-row">
+    <div class="agent m1"><div class="name">Reviewer Agent</div><div class="detail">Verify + rollback<br>Tier 2 &middot; Post-fix check</div></div>
+  </div>
+
+  <div class="pipeline">Ingestion --[raw logs]--> Preprocessing --[parsed]--> Anomaly Detection --[alerts]--> Planner (Mistral-7B)
+    --[rca_plan]--> Executor --[exec result]--> Reviewer --[rollback?]--> Executor (loop)</div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ============================================================ -->
+<!-- MODEL 2 -->
+<!-- ============================================================ -->
+<div class="diagram-section">
+  <h2>Model 2 &mdash; RAG-Enhanced Pipeline <span class="cost">~$0 / incident</span></h2>
+  <p class="model-subtitle">7 agents (+1 new). Adds a Retrieval Agent backed by FAISS. Planner upgraded to Qwen2.5-7B LoRA with RAG context for structured remediation.</p>
+
+  <div class="agent-row">
+    <div class="agent m1"><div class="name">Data Ingestion</div><div class="detail">Tier 1 &middot; Auto</div></div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="agent m1"><div class="name">Preprocessing</div><div class="detail">Tier 1 &middot; Auto</div></div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="agent m1"><div class="name">Anomaly Detection</div><div class="detail">IF / SVM / LOF</div></div>
+  </div>
+
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#64748b"/></svg>
+    <span class="arrow-label">alerts + query</span>
+  </div>
+
+  <div class="agent-row">
+    <div class="agent m2 new"><div class="name">Retrieval Agent</div><div class="detail">FAISS semantic search<br>Similar incidents + runbooks<br>Tier 1 &middot; Auto</div></div>
+    <span class="flow-arrow blue">&harr;</span>
+    <div class="agent shared"><div class="name">Knowledge Base</div><div class="detail">FAISS / Embeddings<br>all-MiniLM-L6-v2</div></div>
+  </div>
+
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#2563eb"/></svg>
+    <span class="arrow-label">RAG context</span>
+  </div>
+
+  <div class="agent-row">
+    <div class="agent m1"><div class="name">Planner Agent</div><div class="detail">Qwen2.5-7B LoRA + RAG<br>Diagnosis + Fix + Verify<br>Tier 2</div></div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="agent m1"><div class="name">Executor</div><div class="detail">Tier 2-3</div></div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="agent m1"><div class="name">Reviewer</div><div class="detail">Tier 2</div></div>
+  </div>
+
+  <div class="pipeline">Anomaly Detection --[query]--> Retrieval Agent <--[vector search]--> Knowledge Base (FAISS)
+                                    |
+                              [RAG context]
+                                    v
+              Planner (Qwen2.5-7B LoRA + RAG) --> Executor --> Reviewer</div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ============================================================ -->
+<!-- MODEL 3 -->
+<!-- ============================================================ -->
+<div class="diagram-section">
+  <h2>Model 3 &mdash; SMART Blackboard Architecture <span class="cost">~$0.08&ndash;0.15 / incident</span></h2>
+  <p class="model-subtitle">9 agents (+2 new). Centralized Blackboard shared state. Adds Intent Classifier and Validation Agent (hallucination detector). Planner upgraded to Claude Opus / GPT-4o.</p>
+
+  <div class="group-box">
+    <div class="group-label">Blackboard Protocol (4 Steps)</div>
+
+    <!-- Step 1 -->
+    <div class="flow-row" style="margin-top: 8px;">
+      <div class="agent m1" style="max-width:140px"><div class="name">Anomaly Detection</div><div class="detail">IF / SVM / LOF</div></div>
+      <span class="flow-arrow purple">&rarr;</span>
+      <div class="agent m3 new"><div class="name">Intent Classifier</div><div class="detail">GPT-4o-mini / Haiku<br>Type + severity</div></div>
+      <span class="flow-arrow purple">&rarr;</span>
+      <div class="agent shared"><div class="name">Blackboard</div><div class="detail">write: intent</div></div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="flow-row">
+      <div class="agent shared" style="max-width:120px"><div class="name">Blackboard</div><div class="detail">read: intent</div></div>
+      <span class="flow-arrow purple">&rarr;</span>
+      <div class="agent m2"><div class="name">Retrieval Agent</div><div class="detail">FAISS search</div></div>
+      <span class="flow-arrow purple">&rarr;</span>
+      <div class="agent shared" style="max-width:120px"><div class="name">Blackboard</div><div class="detail">write: context</div></div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="flow-row">
+      <div class="agent shared" style="max-width:140px"><div class="name">Blackboard</div><div class="detail">read: intent + context</div></div>
+      <span class="flow-arrow purple">&rarr;</span>
+      <div class="agent m3 new"><div class="name">Validation Agent</div><div class="detail">GPT-4o / Sonnet<br>Hallucination detector</div></div>
+      <span class="flow-arrow purple">&rarr;</span>
+      <div class="agent shared" style="max-width:140px"><div class="name">Blackboard</div><div class="detail">write: validation</div></div>
+    </div>
+
+    <!-- Decision gate -->
+    <div class="flow-row">
+      <div class="decision"><span>OK?</span></div>
+      <span style="font-size:0.75rem; color:#059669; font-weight:600;">YES &rarr; proceed</span>
+      <span style="font-size:0.75rem; color:#aaa; margin: 0 6px;">|</span>
+      <span style="font-size:0.75rem; color:#ea580c; font-weight:600;">NO &rarr; re-classify (loop to Step 1)</span>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="flow-row">
+      <div class="agent shared" style="max-width:140px"><div class="name">Blackboard</div><div class="detail">read: all state</div></div>
+      <span class="flow-arrow purple">&rarr;</span>
+      <div class="agent m1"><div class="name">Planner Agent</div><div class="detail">Opus / GPT-4o<br>Tier 2</div></div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="agent m1"><div class="name">Executor</div><div class="detail">Tier 2-3</div></div>
+      <span class="flow-arrow">&rarr;</span>
+      <div class="agent m1"><div class="name">Reviewer</div><div class="detail">Tier 2</div></div>
+    </div>
+  </div>
+
+  <div class="pipeline">Step 1: Anomaly --> Intent Classifier --[write: intent]----------> BLACKBOARD
+Step 2: BLACKBOARD --[read: intent]--> Retrieval --[write: context]---> BLACKBOARD
+Step 3: BLACKBOARD --[read: all]-----> Validation --[write: result]---> BLACKBOARD
+         Decision: OK? --YES--> Step 4   --NO--> Re-classify (Step 1)
+Step 4: BLACKBOARD --[read: all]-----> Planner (Opus/GPT-4o) --> Executor --> Reviewer</div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ============================================================ -->
+<!-- MODEL 4 -->
+<!-- ============================================================ -->
+<div class="diagram-section">
+  <h2>Model 4 &mdash; Self-Evolving Multi-Agent Debate <span class="cost">~$0.30&ndash;0.60 / incident</span></h2>
+  <p class="model-subtitle">14 agents (+5 new). Three Debater Agents generate competing hypotheses. Referee scores by evidence, logic, specificity, and resilience. Safety Agent gates high-risk actions. Context Memory enables long-term learning.</p>
+
+  <!-- Input from Blackboard -->
+  <div class="agent-row">
+    <div class="agent shared"><div class="name">Blackboard</div><div class="detail">Validated state from M3</div></div>
+  </div>
+
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#dc2626"/></svg>
+    <span class="arrow-label">blackboard state to all debaters</span>
+  </div>
+
+  <!-- Debaters -->
+  <div class="group-box">
+    <div class="group-label">Round 1 &mdash; Independent Hypotheses</div>
+    <div class="agent-row">
+      <div class="agent m4 new"><div class="name">Debater 1</div><div class="detail">Claude Opus 4<br>Analytical</div></div>
+      <div class="agent m4 new"><div class="name">Debater 2</div><div class="detail">GPT-4o<br>Orchestrator</div></div>
+      <div class="agent m4 new"><div class="name">Debater 3</div><div class="detail">DeepSeek-R1<br>Contrarian</div></div>
+    </div>
+  </div>
+
+  <!-- Cross-examination -->
+  <div class="arrow-row">
+    <span class="arrow-label" style="color:#dc2626;">Round 2 &mdash; Cross-examination (debaters critique each other)</span>
+  </div>
+
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#dc2626"/></svg>
+    <span class="arrow-label">competing hypotheses</span>
+  </div>
+
+  <!-- Referee -->
+  <div class="agent-row">
+    <div class="agent m4 new"><div class="name">Referee Agent</div><div class="detail">Evidence 35% &middot; Logic 25%<br>Specificity 20% &middot; Resilience 20%</div></div>
+  </div>
+
+  <div class="arrow-row">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#dc2626"/></svg>
+    <span class="arrow-label">winning hypothesis</span>
+  </div>
+
+  <!-- Safety gate -->
+  <div class="agent-row">
+    <div class="agent m4 new"><div class="name">Safety Agent (HiTL)</div><div class="detail">Risk gate: Low / Med / High<br>Tier 3</div></div>
+  </div>
+
+  <!-- Decision -->
+  <div class="flow-row">
+    <div class="decision"><span>Risk?</span></div>
+  </div>
+  <div class="flow-row" style="gap: 32px;">
+    <div style="text-align:center;">
+      <div class="agent m1" style="max-width:160px"><div class="name">Executor</div><div class="detail">Auto-execute</div></div>
+      <div style="font-size:0.7rem; color:#059669; font-weight:600; margin-top:4px;">Low risk</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="agent human" style="max-width:160px"><div class="name">Human SRE</div><div class="detail">Manual approval required</div></div>
+      <div style="font-size:0.7rem; color:#ea580c; font-weight:600; margin-top:4px;">High risk</div>
+    </div>
+  </div>
+
+  <div class="arrow-row" style="margin-top:12px;">
+    <svg viewBox="0 0 22 22"><polygon points="11,20 5,8 17,8" fill="#059669"/></svg>
+    <span class="arrow-label" style="color:#059669;">outcome indexed for future learning</span>
+  </div>
+
+  <div class="flow-row">
+    <div class="agent m4 new"><div class="name">Context Memory</div><div class="detail">Long-term learning store<br>text-embedding-3-large</div></div>
+    <span class="flow-arrow green">&rarr;</span>
+    <div class="agent shared"><div class="name">Knowledge Base</div><div class="detail">FAISS &middot; learning feedback loop</div></div>
+  </div>
+
+  <div class="pipeline">Blackboard (M3 output) --> Debater 1 (Opus) ----+
+                       --> Debater 2 (GPT-4o) ---+--> Cross-Examination --> Referee [Score]
+                       --> Debater 3 (DeepSeek) --+                            |
+                                                                        Safety Agent [Risk?]
+                                                                       /                \
+                                                                Low: auto-exec     High: Human SRE
+                                                                      |
+                                                               Context Memory --> Knowledge Base (learning loop)</div>
+</div>
+
+</body>
+</html>
