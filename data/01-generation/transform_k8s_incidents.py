@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Transform raw k8s_config_incidents.jsonl into simplified 4-field JSONL.
+"""Transform raw k8s_config_incidents.jsonl into 4-column JSONL.
 
 Source fields (02-raw/k8s_config_incidents.jsonl):
-    scenario_id, evidence_text, diagnosis_text, fix_plan_text, ...
+    scenario_id, evidence_text, ...
 
 Target fields (02-raw/k8s_incidents_transformed.jsonl):
-    scenario      — scenario_id
-    k_describe_output — kubectl describe pod + events section from evidence_text
-    k_logs_output     — container logs section from evidence_text
-    solution          — combined diagnosis + fix plan as a single paragraph
+    scenario_id       — incident scenario identifier
+    pod_describe      — kubectl describe pod section from evidence_text
+    pod_logs          — container logs section from evidence_text
+    pod_logs_previous — previous container logs (empty if not present)
 """
 
 import json
@@ -24,7 +24,6 @@ OUTPUT_PATH = RAW_DIR / "k8s_incidents_transformed.jsonl"
 def extract_describe_output(evidence: str) -> str:
     """Extract the kubectl describe pod section (including events) up to the
     kubectl get events or container logs delimiter."""
-    # Start after "=== kubectl describe pod ==="
     m_start = re.search(r"=== kubectl describe pod ===\n", evidence)
     if not m_start:
         return ""
@@ -35,7 +34,6 @@ def extract_describe_output(evidence: str) -> str:
     if m_end:
         return evidence[start : start + m_end.start()].strip()
 
-    # Fallback: end at container logs
     m_end = re.search(r"\n=== container logs ===", evidence[start:])
     if m_end:
         return evidence[start : start + m_end.start()].strip()
@@ -51,17 +49,12 @@ def extract_logs_output(evidence: str) -> str:
     return evidence[m.end():].strip()
 
 
-def build_solution(diagnosis: str, fix_plan: str) -> str:
-    """Combine diagnosis and fix plan into a single solution paragraph."""
-    # Strip numbered prefixes from fix_plan steps and join into flowing text
-    steps = []
-    for line in fix_plan.strip().splitlines():
-        line = re.sub(r"^\d+\.\s*", "", line.strip())
-        if line:
-            steps.append(line)
-    fix_text = " ".join(steps)
-    # Combine: diagnosis sentence(s) + fix steps
-    return f"{diagnosis.strip()} {fix_text}".strip()
+def extract_previous_logs(evidence: str) -> str:
+    """Extract the previous container logs section, if present."""
+    m = re.search(r"=== container logs previous ===\n", evidence)
+    if not m:
+        return ""
+    return evidence[m.end():].strip()
 
 
 def main():
@@ -77,12 +70,10 @@ def main():
             rec = json.loads(line)
 
             transformed = {
-                "scenario": rec["scenario_id"],
-                "k_describe_output": extract_describe_output(rec["evidence_text"]),
-                "k_logs_output": extract_logs_output(rec["evidence_text"]),
-                "solution": build_solution(
-                    rec["diagnosis_text"], rec["fix_plan_text"]
-                ),
+                "scenario_id": rec["scenario_id"],
+                "pod_describe": extract_describe_output(rec["evidence_text"]),
+                "pod_logs": extract_logs_output(rec["evidence_text"]),
+                "pod_logs_previous": extract_previous_logs(rec["evidence_text"]),
             }
             fout.write(json.dumps(transformed, ensure_ascii=False) + "\n")
             records_out += 1
