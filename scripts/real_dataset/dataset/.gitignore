@@ -1,0 +1,4 @@
+# Generated dataset artifacts (keep this folder in repo via README.md + .gitkeep)
+*.jsonl
+!deveshDataSet.jsonl
+*.parquet
