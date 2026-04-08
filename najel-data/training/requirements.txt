@@ -1,0 +1,13 @@
+numpy
+pandas
+pyarrow
+scikit-learn
+matplotlib
+seaborn
+tqdm
+datasets
+transformers
+accelerate
+torch
+jupyter
+ipykernel
