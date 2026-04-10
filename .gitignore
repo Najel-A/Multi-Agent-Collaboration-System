@@ -4,3 +4,4 @@ clusters/elk-aws/.env
 clusters/elk-prod/.env
 clusters/monitoring-cluster-qa/.env
 testjobs
+k8s_data_generator
