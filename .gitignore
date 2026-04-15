@@ -3,3 +3,6 @@ clusters/elk-aws/.env
 .venv
 clusters/elk-prod/.env
 mistral7b_qlora_out
+
+# HF Trainer checkpoint optimizers — exceed GitHub 100MB per-file limit
+**/optimizer.pt

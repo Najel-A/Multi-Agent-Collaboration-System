@@ -1,0 +1,31 @@
+{
+  "config": {
+    "MODEL_ID": "Qwen/Qwen2.5-8B-Instruct",
+    "FALLBACK_MODEL_ID": "Qwen/Qwen2.5-7B-Instruct",
+    "SEED": 42,
+    "TEST_SIZE": 0.1,
+    "VAL_SIZE": 0.1,
+    "MAX_SEQ_LEN": 2048,
+    "EPOCHS": 2,
+    "LEARNING_RATE": 0.0002,
+    "WEIGHT_DECAY": 0.01,
+    "WARMUP_RATIO": 0.03,
+    "PER_DEVICE_TRAIN_BATCH_SIZE": 1,
+    "PER_DEVICE_EVAL_BATCH_SIZE": 1,
+    "GRADIENT_ACCUMULATION_STEPS": 8,
+    "LORA_R": 16,
+    "LORA_ALPHA": 32,
+    "LORA_DROPOUT": 0.05,
+    "LOGGING_STEPS": 10,
+    "SAVE_STEPS": 100,
+    "EVAL_STEPS": 100,
+    "USE_BF16": true,
+    "LOAD_IN_4BIT": true,
+    "RESUME_IF_CHECKPOINT_EXISTS": true
+  },
+  "model_id_used": "Qwen/Qwen2.5-7B-Instruct",
+  "latest_checkpoint_before_train": null,
+  "train_size": 5600,
+  "val_size": 700,
+  "test_size": 700
+}

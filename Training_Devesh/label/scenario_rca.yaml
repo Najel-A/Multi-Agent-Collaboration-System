@@ -1,0 +1,155 @@
+crashloop_bad_args: 'The container repeatedly crashes because the startup command
+  or arguments are invalid for the image. The process exits quickly, causing Kubernetes
+  to restart it and enter CrashLoopBackOff.
+
+  Remediation:
+
+  - Review the command and args configured in the pod spec.
+
+  - Compare them with the image''s expected entrypoint usage.
+
+  - Fix the arguments and redeploy.'
+createcontainerconfigerror_bad_configmap_key: 'The pod enters CreateContainerConfigError
+  because it references a ConfigMap key that is missing or invalid. The container
+  configuration cannot be completed with the requested configuration source.
+
+  Remediation:
+
+  - Check the ConfigMap name and referenced keys.
+
+  - Add the missing key or correct the manifest reference.
+
+  - Restart the workload after updating configuration.'
+createcontainerconfigerror_missing_secret: 'The pod enters CreateContainerConfigError
+  because the container spec references a Secret that does not exist or is unavailable.
+  Kubernetes cannot build the container configuration, so the container never starts.
+
+  Remediation:
+
+  - Verify the Secret name, key, and namespace.
+
+  - Create the missing Secret or correct the reference.
+
+  - Redeploy after confirming access.'
+dns_resolution_failure: 'The application fails because in-cluster DNS resolution is
+  not succeeding for the requested hostname or service name. As a result, the pod
+  cannot resolve dependencies and the workload errors during startup or runtime.
+
+  Remediation:
+
+  - Check the target service name, namespace, and DNS suffix.
+
+  - Verify CoreDNS and cluster DNS health.
+
+  - Test name resolution from a debug pod.'
+failedscheduling_insufficient_cpu: 'The pod cannot be scheduled because cluster nodes
+  do not have enough allocatable CPU to satisfy its request. The scheduler keeps the
+  pod pending until sufficient CPU is available.
+
+  Remediation:
+
+  - Reduce CPU requests if possible.
+
+  - Scale the cluster or free existing CPU reservations.
+
+  - Review bin-packing and node capacity.'
+failedscheduling_insufficient_memory: 'The pod cannot be scheduled because cluster
+  nodes do not have enough allocatable memory to satisfy its request. The scheduler
+  leaves the pod pending until capacity increases or requests are reduced.
+
+  Remediation:
+
+  - Reduce memory requests if they are oversized.
+
+  - Free capacity or scale the node pool.
+
+  - Check fragmentation and per-node allocatable memory.'
+failedscheduling_taint: 'The pod is unschedulable because available nodes have taints
+  that the pod does not tolerate. The scheduler rejects placement until matching tolerations
+  are added or a compatible node is available.
+
+  Remediation:
+
+  - Inspect node taints with kubectl describe nodes.
+
+  - Add the required tolerations to the pod spec if appropriate.
+
+  - Alternatively schedule onto untainted nodes.'
+imagepull_bad_tag: 'The container image cannot be pulled because the specified tag
+  does not exist or is incorrect in the registry. The pod remains stuck waiting for
+  a valid image to download.
+
+  Remediation:
+
+  - Verify the image repository and tag.
+
+  - Update the deployment to a valid published tag.
+
+  - Recreate the pod after fixing the image reference.'
+imagepull_registry_auth: 'The image pull fails because the registry requires authentication
+  and the pod lacks valid credentials. Without a working imagePullSecret or authorized
+  service account, Kubernetes cannot download the image.
+
+  Remediation:
+
+  - Verify registry credentials and imagePullSecrets.
+
+  - Ensure the secret exists in the correct namespace.
+
+  - Attach the secret to the workload or service account.'
+nodeselector_mismatch: 'The pod is unschedulable because its nodeSelector does not
+  match labels on any available node. The scheduler cannot place the workload until
+  the selector or node labels are corrected.
+
+  Remediation:
+
+  - Inspect the nodeSelector in the workload spec.
+
+  - Compare it against actual node labels.
+
+  - Fix the selector or label the intended nodes.'
+oomkilled_limit_too_low: 'The container is being OOMKilled because its memory limit
+  is too low for the workload''s actual usage. When the process exceeds the cgroup
+  memory limit, the kernel terminates it and Kubernetes restarts the container.
+
+  Remediation:
+
+  - Increase the container memory limit and request.
+
+  - Inspect memory usage patterns and leaks.
+
+  - Re-run after adjusting resource settings.'
+pvc_not_found_mountfail: 'The workload fails during volume setup because the referenced
+  PersistentVolumeClaim does not exist or cannot be resolved in the namespace. Kubernetes
+  cannot mount the requested storage, so the pod never starts normally.
+
+  Remediation:
+
+  - Verify the PVC name and namespace.
+
+  - Create the missing PVC or fix the claim reference in the workload spec.
+
+  - Confirm the bound volume is available before redeploying.'
+rbac_forbidden: 'The workload fails because the service account does not have RBAC
+  permission to perform the requested Kubernetes API action. The API server returns
+  Forbidden, blocking the application from accessing cluster resources it expects.
+
+  Remediation:
+
+  - Identify the denied verb, resource, and API group.
+
+  - Update the Role or ClusterRole and corresponding binding.
+
+  - Verify the pod is using the intended service account.'
+service_connection_refused: 'The application reaches the target address but the connection
+  is refused, which usually means the service endpoint is not accepting traffic on
+  that port. This can happen when the backend is down, listening on a different port,
+  or has no ready endpoints.
+
+  Remediation:
+
+  - Check whether the target service has ready endpoints.
+
+  - Verify container port and service port mappings.
+
+  - Confirm the backend process is actually listening.'
