@@ -1,0 +1,11 @@
+# Pin versions: transformers 5.x + bitsandbytes can hit
+# AttributeError: 'Qwen2ForCausalLM' object has no attribute 'set_submodule'
+# with the PyTorch shipped in pytorch/pytorch:2.4.x images. Do not install torch
+# here — use the CUDA build from the base image only.
+accelerate==0.34.2
+bitsandbytes==0.44.1
+fastapi>=0.115.0
+peft==0.18.1
+pydantic>=2.0.0
+transformers==4.46.3
+uvicorn[standard]>=0.30.0

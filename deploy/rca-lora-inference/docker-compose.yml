@@ -1,0 +1,44 @@
+# From this directory:
+#   docker compose build
+#   docker compose --profile qwen up        # Qwen on http://localhost:8001
+#   docker compose --profile deepseek up    # DeepSeek on http://localhost:8002
+# Use one profile at a time on a single consumer GPU (both need VRAM).
+# Requires Docker Desktop with GPU enabled, and NVIDIA drivers on the host.
+# Set HF_TOKEN in .env if your base models need Hugging Face authentication.
+
+services:
+  rca-qwen:
+    profiles: ["qwen"]
+    build: .
+    ports:
+      - "8001:8000"
+    environment:
+      MODEL_PROFILE: qwen
+      ADAPTER_PATH: /adapters
+      LOAD_IN_4BIT: "true"
+      HF_HOME: /hf-cache
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ../../Training_Devesh/qwen_rca_8b-20260415T223457Z-3-001/qwen_rca_8b:/adapters:ro
+      - qwen-hf-cache:/hf-cache
+    gpus: all
+
+  rca-deepseek:
+    profiles: ["deepseek"]
+    build: .
+    ports:
+      - "8002:8000"
+    environment:
+      MODEL_PROFILE: deepseek
+      ADAPTER_PATH: /adapters
+      LOAD_IN_4BIT: "true"
+      HF_HOME: /hf-cache
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - "../../Training_Devesh/deepseek final-20260419T233959Z-3-001/deepseek final:/adapters:ro"
+      - deepseek-hf-cache:/hf-cache
+    gpus: all
+
+volumes:
+  qwen-hf-cache:
+  deepseek-hf-cache:
