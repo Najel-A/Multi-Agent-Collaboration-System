@@ -304,6 +304,7 @@ class Orchestrator:
         incident: dict[str, Any],
         *,
         approval_callback: ApprovalCallback | None = None,
+        total_timeout_s: float | None = None,
     ) -> StructuredRCAResult:
         """Run the full pipeline on one incident.
 
@@ -316,11 +317,20 @@ class Orchestrator:
         returns truthy, the result is approved; otherwise it is rejected.
         Without a callback the result returns with approval_status="pending"
         and the caller MUST approve before any command is executed.
+
+        total_timeout_s (optional): per-request override of the orchestrator's
+        configured pipeline timeout. Lets API callers (e.g. the LSA-WebApp's
+        `max_time` field) supply a deadline for this single invocation.
         """
         start = time.time()
+        effective_total = (
+            total_timeout_s
+            if total_timeout_s is not None
+            else self.total_timeout_s
+        )
         deadline = (
-            start + self.total_timeout_s
-            if self.total_timeout_s is not None
+            start + effective_total
+            if effective_total is not None
             else None
         )
 
@@ -559,3 +569,63 @@ def execute_commands(
     for cmd in result.commands:
         outputs.append(runner(cmd))
     return outputs
+
+
+# ---------------------------------------------------------------------------
+# Section-formatted text rendering
+# ---------------------------------------------------------------------------
+
+def format_as_sections(result: StructuredRCAResult) -> str:
+    """Render a StructuredRCAResult into the five-header text format expected
+    by frontend RCA parsers (e.g. LSA-WebApp's parseRcaResponse). Headers are
+    plain text on their own line — no markdown prefix required:
+
+        Diagnosis
+        Step-by-Step Fix Plan
+        Concrete Actions or Commands to Apply the Fix
+        Verification Steps to Confirm the Fix Worked
+        Rollback Guidance if the Fix Causes Issues
+
+    Commands are prefixed with `[PENDING APPROVAL]` until result.approval_status
+    flips to "approved" — the gate stays visible to the operator reading the
+    rendered output.
+    """
+    lines: list[str] = []
+
+    lines.append("Diagnosis")
+    lines.append(result.diagnosis or "(no diagnosis)")
+    lines.append("")
+
+    lines.append("Step-by-Step Fix Plan")
+    if result.fix_plan:
+        for i, step in enumerate(result.fix_plan, 1):
+            lines.append(f"{i}. {step}")
+    else:
+        lines.append("(no fix plan)")
+    lines.append("")
+
+    lines.append("Concrete Actions or Commands to Apply the Fix")
+    cmd_prefix = "" if result.approval_status == "approved" else "[PENDING APPROVAL] "
+    if result.commands:
+        for cmd in result.commands:
+            lines.append(f"- {cmd_prefix}{cmd}")
+    else:
+        lines.append("(no commands)")
+    lines.append("")
+
+    lines.append("Verification Steps to Confirm the Fix Worked")
+    if result.verification:
+        for step in result.verification:
+            lines.append(f"- {step}")
+    else:
+        lines.append("(no verification steps)")
+    lines.append("")
+
+    lines.append("Rollback Guidance if the Fix Causes Issues")
+    if result.rollback:
+        for step in result.rollback:
+            lines.append(f"- {step}")
+    else:
+        lines.append("(no rollback guidance)")
+
+    return "\n".join(lines)
