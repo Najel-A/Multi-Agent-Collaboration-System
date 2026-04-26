@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RCA Dashboard</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 1100px;
+         margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { margin-bottom: 0.2rem; }
+  .sub { color: #777; margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  textarea { width: 100%; height: 320px; font-family: ui-monospace, Consolas, monospace;
+             font-size: 12px; padding: 0.6rem; border: 1px solid #ccc; border-radius: 6px; }
+  button { padding: 0.5rem 1rem; font-size: 14px; border: 1px solid #3b82f6;
+           background: #3b82f6; color: white; border-radius: 6px; cursor: pointer; }
+  button:disabled { background: #9ca3af; border-color: #9ca3af; cursor: wait; }
+  button.secondary { background: white; color: #3b82f6; }
+  select { padding: 0.4rem; font-size: 14px; margin-right: 0.5rem; }
+  .result { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+            padding: 1rem; margin-top: 1rem; }
+  .section { margin-bottom: 1.2rem; }
+  .section h3 { margin: 0 0 0.4rem 0; font-size: 14px; text-transform: uppercase;
+                color: #374151; letter-spacing: 0.05em; }
+  .section ul, .section ol { margin: 0; padding-left: 1.4rem; }
+  .section li { margin: 0.2rem 0; font-size: 14px; }
+  .pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px;
+          font-size: 11px; background: #e0e7ff; color: #3730a3; margin-left: 0.5rem; }
+  pre { background: white; padding: 0.6rem; border: 1px solid #e5e7eb;
+        border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; }
+  .meta { color: #6b7280; font-size: 12px; margin-top: 0.5rem; }
+  .err { color: #dc2626; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>RCA Dashboard</h1>
+<div class="sub">
+  Multi-agent Kubernetes Root Cause Analysis —
+  <span id="backend-label">checking backend…</span>
+</div>
+
+<div class="row">
+  <div>
+    <div style="margin-bottom: 0.5rem;">
+      <select id="sample-picker">
+        <option value="">-- Load a sample incident --</option>
+      </select>
+      <button class="secondary" onclick="loadSample()">Load</button>
+    </div>
+
+    <label><strong>Incident JSON</strong></label>
+    <textarea id="incident" placeholder='{
+  "scenario_id": "createcontainerconfigerror_missing_secret",
+  "namespace": "team-b-stg",
+  "pod_name": "service-w-bm4b-0",
+  "pod_status": "Pending",
+  "event_reason": "Failed",
+  "event_message": "Error: secret \"db-credentials\" not found",
+  "pod_describe": "Name: service-w-bm4b-0 ..."
+}'></textarea>
+
+    <div style="margin-top: 0.8rem;">
+      <button id="analyze-btn" onclick="analyze()">Analyze</button>
+      <span id="status" class="meta"></span>
+    </div>
+  </div>
+
+  <div>
+    <label><strong>Structured RCA Result</strong></label>
+    <div id="result" class="result">
+      <em style="color:#9ca3af">Submit an incident to see the pipeline output here.</em>
+    </div>
+  </div>
+</div>
+
+<script>
+async function checkBackend() {
+  try {
+    const r = await fetch('/health');
+    const j = await r.json();
+    document.getElementById('backend-label').innerHTML =
+      `backend = <code>${j.backend}</code> · dataset ${j.data_path_exists ? 'present' : 'missing'}`;
+  } catch (e) {
+    document.getElementById('backend-label').textContent = 'offline';
+  }
+}
+
+async function loadSamples() {
+  try {
+    const r = await fetch('/incidents/samples?count=6');
+    if (!r.ok) return;
+    const samples = await r.json();
+    const sel = document.getElementById('sample-picker');
+    samples.forEach((s, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = `${s.scenario_id}  (${s.namespace})`;
+      opt.dataset.json = JSON.stringify(s, null, 2);
+      sel.appendChild(opt);
+    });
+  } catch (e) { /* dataset not present — silent */ }
+}
+
+function loadSample() {
+  const sel = document.getElementById('sample-picker');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.dataset.json) return;
+  document.getElementById('incident').value = opt.dataset.json;
+}
+
+async function analyze() {
+  const btn = document.getElementById('analyze-btn');
+  const statusEl = document.getElementById('status');
+  const resultEl = document.getElementById('result');
+  const raw = document.getElementById('incident').value.trim();
+
+  let incident;
+  try {
+    incident = JSON.parse(raw);
+  } catch (e) {
+    resultEl.innerHTML = `<span class="err">Invalid JSON: ${e.message}</span>`;
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Analyzing…';
+  statusEl.textContent = '';
+  resultEl.innerHTML = '<em style="color:#9ca3af">Running 4-agent pipeline…</em>';
+
+  const start = Date.now();
+  try {
+    const r = await fetch('/analyze', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(incident),
+    });
+    if (!r.ok) {
+      const err = await r.json();
+      resultEl.innerHTML = `<span class="err">Error ${r.status}: ${err.detail}</span>`;
+      return;
+    }
+    const j = await r.json();
+    render(j);
+    statusEl.textContent = `done in ${Date.now() - start}ms (server-side: ${j.duration_ms.toFixed(0)}ms)`;
+  } catch (e) {
+    resultEl.innerHTML = `<span class="err">Network error: ${e.message}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Analyze';
+  }
+}
+
+function render(r) {
+  const sec = (title, items, {ordered=false}={}) => {
+    if (!items || items.length === 0) return '';
+    const tag = ordered ? 'ol' : 'ul';
+    const body = items.map(x => `<li>${escape(x)}</li>`).join('');
+    return `<div class="section"><h3>${title}</h3><${tag}>${body}</${tag}></div>`;
+  };
+  const html = `
+    <div class="section">
+      <h3>Diagnosis <span class="pill">${escape(r.incident_id || '')}</span></h3>
+      <p>${escape(r.diagnosis || '(empty)')}</p>
+    </div>
+    ${sec('Fix plan', r.fix_plan, {ordered: true})}
+    ${sec('Commands', (r.commands || []).map(c => '<code>' + escape(c) + '</code>'))}
+    ${sec('Verification', r.verification)}
+    ${sec('Rollback', r.rollback)}
+    <div class="section">
+      <h3>Reconciliation notes</h3>
+      <p class="meta">${escape(r.reconciliation_notes || '(none)')}</p>
+    </div>
+    <details>
+      <summary style="cursor:pointer;color:#6b7280;font-size:12px">Raw response</summary>
+      <pre>${escape(JSON.stringify(r, null, 2))}</pre>
+    </details>
+  `;
+  document.getElementById('result').innerHTML = html;
+}
+
+function escape(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, ch => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[ch]));
+}
+
+checkBackend();
+loadSamples();
+</script>
+</body>
+</html>

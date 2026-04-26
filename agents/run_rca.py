@@ -1,26 +1,48 @@
 #!/usr/bin/env python3
-"""CLI to run the multi-agent RCA pipeline on synthetic incidents.
+"""CLI to run the multi-agent RCA pipeline on k8s incidents.
 
 Usage:
-  # Analyze first N incidents from source data
-  python -m agents.run_rca --data data/02-raw/synthetic_source.jsonl --count 5
+    # Default: bootstrap mode (one model for all 4 roles) against local Ollama
+    python -m agents.run_rca --count 5
 
-  # Analyze a single incident by ID
-  python -m agents.run_rca --data data/02-raw/synthetic_source.jsonl --id <uuid>
+    # Production mode: per-role fine-tuned models
+    python -m agents.run_rca --mode roles --count 5
 
-  # Batch mode with evaluation against ground truth
-  python -m agents.run_rca --data data/02-raw/synthetic_source.jsonl --count 100 --evaluate
+    # Single incident by pod_name or scenario_id
+    python -m agents.run_rca --id busybox-pn3zirfh-86bbb7957c-7754l
+
+    # Point at vLLM / OpenAI-compatible endpoint
+    python -m agents.run_rca --backend vllm --backend-url http://vllm.internal:8000/v1
+
+    # Change bootstrap model
+    python -m agents.run_rca --bootstrap-model llama3.2:3b
+
+    # Write structured results to JSON
+    python -m agents.run_rca --count 20 --output results.json
 """
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
-from agents.orchestrator import Orchestrator
+from agents.orchestrator import Orchestrator, StructuredRCAResult
+from agents.model_loaders import ollama_loader, vllm_loader
 
 
-def load_incidents(path: str, count: int | None = None, incident_id: str | None = None) -> list[dict]:
+DEFAULT_DATA = "data/02-raw/k8s_combined_incidents.jsonl"
+
+
+def load_incidents(
+    path: str,
+    count: int | None = None,
+    incident_id: str | None = None,
+) -> list[dict]:
+    """Load records from k8s_combined_incidents.jsonl (flat schema).
+
+    --id matches against `pod_name` first, then `scenario_id`.
+    """
     records: list[dict] = []
     with open(path, "r") as f:
         for line in f:
@@ -28,51 +50,79 @@ def load_incidents(path: str, count: int | None = None, incident_id: str | None 
             if not line:
                 continue
             rec = json.loads(line)
-            if incident_id and rec.get("id") == incident_id:
+            if incident_id and (
+                rec.get("pod_name") == incident_id
+                or rec.get("scenario_id") == incident_id
+            ):
                 return [rec]
+            if incident_id:
+                continue
             records.append(rec)
-            if count and len(records) >= count and not incident_id:
+            if count and len(records) >= count:
                 break
     return records
 
 
-def evaluate_report(report, ground_truth: dict) -> dict:
-    """Compare RCA report against ground truth from synthetic data."""
-    gt_category = ground_truth.get("remediation", {}).get("category", "")
-    gt_diagnosis = ground_truth.get("remediation", {}).get("diagnosis", "")
-    gt_scenario = ground_truth.get("fault", {}).get("scenario_id", "")
-
-    # Category match (fuzzy — check if ground truth category appears in predicted)
-    pred_cat = report.category.lower().replace("_", "")
-    gt_cat = gt_category.lower().replace("_", "")
-    category_match = gt_cat in pred_cat or pred_cat in gt_cat
-
-    # Diagnosis keyword overlap
-    gt_keywords = set(gt_diagnosis.lower().split())
-    pred_keywords = set(report.root_cause.lower().split())
-    common = gt_keywords & pred_keywords
-    keyword_overlap = len(common) / max(len(gt_keywords), 1)
-
-    return {
-        "incident_id": report.incident_id,
-        "scenario": gt_scenario,
-        "category_match": category_match,
-        "predicted_category": report.category,
-        "ground_truth_category": gt_category,
-        "keyword_overlap": round(keyword_overlap, 3),
-        "has_fix_plan": len(report.fix_plan) > 0,
-        "has_commands": len(report.commands) > 0,
-    }
+def build_loader(args: argparse.Namespace):
+    """Pick the model-client loader based on --backend."""
+    if args.backend == "ollama":
+        return ollama_loader(base_url=args.backend_url or "http://localhost:11434")
+    if args.backend == "vllm":
+        if not args.backend_url:
+            print("--backend vllm requires --backend-url", file=sys.stderr)
+            sys.exit(2)
+        return vllm_loader(
+            base_url=args.backend_url,
+            api_key=os.environ.get("VLLM_API_KEY"),
+        )
+    raise ValueError(f"unknown backend: {args.backend}")
 
 
-def main():
+def build_orchestrator(args: argparse.Namespace) -> Orchestrator:
+    loader = build_loader(args)
+    if args.mode == "bootstrap":
+        return Orchestrator.from_bootstrap(
+            loader,
+            model=args.bootstrap_model,
+            parallel=not args.no_parallel,
+        )
+    return Orchestrator.from_role_defaults(loader, parallel=not args.no_parallel)
+
+
+def print_short(r: StructuredRCAResult) -> None:
+    head = r.incident_id[:40]
+    diag = (r.diagnosis or "").replace("\n", " ")[:100]
+    print(
+        f"[{head:<40}] "
+        f"fix_plan={len(r.fix_plan)} commands={len(r.commands)} "
+        f"verification={len(r.verification)} rollback={len(r.rollback)}  "
+        f"{diag}"
+    )
+
+
+def main() -> None:
     ap = argparse.ArgumentParser(description="Run multi-agent RCA pipeline")
-    ap.add_argument("--data", type=str, default="data/02-raw/synthetic_source.jsonl")
-    ap.add_argument("--count", type=int, default=5, help="Number of incidents to analyze")
-    ap.add_argument("--id", type=str, default=None, help="Analyze a specific incident by ID")
-    ap.add_argument("--evaluate", action="store_true", help="Evaluate against ground truth")
-    ap.add_argument("--output", type=str, default=None, help="Write reports to JSON file")
-    ap.add_argument("--verbose", action="store_true", help="Print full reports")
+    ap.add_argument("--data", type=str, default=DEFAULT_DATA,
+                    help=f"Path to incidents JSONL (default: {DEFAULT_DATA})")
+    ap.add_argument("--count", type=int, default=5,
+                    help="Number of incidents to analyze")
+    ap.add_argument("--id", type=str, default=None,
+                    help="Analyze a single incident by pod_name or scenario_id")
+    ap.add_argument("--mode", choices=("bootstrap", "roles"), default="bootstrap",
+                    help="bootstrap = one model for all 4 slots (default); "
+                         "roles = per-role fine-tuned models")
+    ap.add_argument("--bootstrap-model", type=str, default="qwen3.5:9b",
+                    help="Model used for all slots in bootstrap mode")
+    ap.add_argument("--backend", choices=("ollama", "vllm"), default="ollama",
+                    help="Inference backend")
+    ap.add_argument("--backend-url", type=str, default=None,
+                    help="Backend base URL (defaults to localhost Ollama)")
+    ap.add_argument("--no-parallel", action="store_true",
+                    help="Disable parallel Agent 1 / Agent 2 execution")
+    ap.add_argument("--output", type=str, default=None,
+                    help="Write structured results to JSON file")
+    ap.add_argument("--verbose", action="store_true",
+                    help="Print the full summary for each incident")
     args = ap.parse_args()
 
     if not Path(args.data).exists():
@@ -84,42 +134,27 @@ def main():
         print("No incidents found.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Analyzing {len(incidents)} incident(s)...\n")
+    print(
+        f"Analyzing {len(incidents)} incident(s) "
+        f"via {args.backend}/{args.mode}"
+        + (f" [bootstrap model: {args.bootstrap_model}]" if args.mode == "bootstrap" else "")
+        + "...\n"
+    )
 
-    orchestrator = Orchestrator(parallel=True)
-    reports = orchestrator.analyze_batch(incidents)
+    orchestrator = build_orchestrator(args)
+    results = orchestrator.analyze_batch(incidents)
 
-    eval_results: list[dict] = []
-
-    for report, incident in zip(reports, incidents):
+    for r in results:
         if args.verbose:
-            print(report.summary())
+            print(r.summary())
             print()
         else:
-            print(f"[{report.incident_id[:8]}] {report.category} | {report.severity} | {report.root_cause[:80]}...")
+            print_short(r)
 
-        if args.evaluate:
-            ev = evaluate_report(report, incident)
-            eval_results.append(ev)
-
-    # Evaluation summary
-    if args.evaluate and eval_results:
-        cat_matches = sum(1 for e in eval_results if e["category_match"])
-        avg_overlap = sum(e["keyword_overlap"] for e in eval_results) / len(eval_results)
-        print(f"\n=== Evaluation ({len(eval_results)} incidents) ===")
-        print(f"Category accuracy: {cat_matches}/{len(eval_results)} ({100*cat_matches/len(eval_results):.1f}%)")
-        print(f"Avg keyword overlap: {avg_overlap:.3f}")
-        print(f"Fix plan coverage: {sum(1 for e in eval_results if e['has_fix_plan'])}/{len(eval_results)}")
-
-    # Write output
     if args.output:
-        output_data = [r.to_dict() for r in reports]
-        if args.evaluate:
-            for od, ev in zip(output_data, eval_results):
-                od["evaluation"] = ev
         with open(args.output, "w") as f:
-            json.dump(output_data, f, indent=2)
-        print(f"\nReports written to {args.output}")
+            json.dump([r.to_dict() for r in results], f, indent=2)
+        print(f"\nResults written to {args.output}")
 
 
 if __name__ == "__main__":

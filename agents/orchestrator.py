@@ -1,66 +1,104 @@
-"""Orchestrator — coordinates all agents through the RCA pipeline."""
+"""Orchestrator — multi-agent RCA pipeline.
+
+Pipeline (matches the architecture diagram):
+
+    Incident
+        │
+        ├──► Agent 1 Solution Generator   (RCA: qwen3.5:9b)
+        └──► Agent 2 Solution Generator   (RCA: deepseek-r1:8b)
+                         │
+                         ▼
+        Decision / Reconciliation Agent   (Executor: devstral-small-2:24b)
+                         │
+                         ▼
+               Validation Agent           (Validator: qwen3.5:35b | llama3.2:3b)
+                         │
+                         ▼
+             Structured RCA Result
+        (diagnosis / fix_plan / commands / verification / rollback)
+
+Data source: data/02-raw/k8s_combined_incidents.jsonl (flat 20-field schema).
+SFT data:    data/sft/{rca,executor,validator}_*.jsonl (see
+             data/01-generation/generate_sft_by_role.py for prompt shapes).
+"""
 
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from agents.base_agent import AgentResult
-from agents.triage_agent import TriageAgent
-from agents.log_analyst_agent import LogAnalystAgent
-from agents.state_analyst_agent import StateAnalystAgent
-from agents.diagnostic_agent import DiagnosticAgent
-from agents.remediation_agent import RemediationAgent
+from agents.solution_generator_agent import SolutionGeneratorAgent
+from agents.reconciliation_agent import ReconciliationAgent
+from agents.validation_agent import ValidationAgent
 
+
+# ---------------------------------------------------------------------------
+# Approved SFT-trained models per role.
+# ---------------------------------------------------------------------------
+
+AGENT_ROLE_MODELS: dict[str, tuple[str, ...]] = {
+    "rca":       ("qwen3.5:9b", "deepseek-r1:8b"),
+    "executor":  ("devstral-small-2:24b",),
+    "validator": ("qwen3.5:35b", "llama3.2:3b"),
+}
+
+DEFAULT_PIPELINE: dict[str, str] = {
+    "agent_1":    "qwen3.5:9b",
+    "agent_2":    "deepseek-r1:8b",
+    "reconciler": "devstral-small-2:24b",
+    "validator":  "qwen3.5:35b",  # also doubles as the rollback model
+}
+
+
+# ---------------------------------------------------------------------------
+# Final pipeline output
+# ---------------------------------------------------------------------------
 
 @dataclass
-class RCAReport:
-    """Final Root Cause Analysis report."""
+class StructuredRCAResult:
+    """The 'Structured RCA Result' box in the diagram."""
     incident_id: str
-    category: str
-    severity: str
-    root_cause: str
-    evidence: dict[str, Any]
+    diagnosis: str
     fix_plan: list[str]
     commands: list[str]
     verification: list[str]
     rollback: list[str]
+    agent_1_solution: dict[str, Any] = field(default_factory=dict)
+    agent_2_solution: dict[str, Any] = field(default_factory=dict)
+    reconciliation_notes: str = ""
     agent_results: dict[str, AgentResult] = field(default_factory=dict)
     duration_ms: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "incident_id": self.incident_id,
-            "category": self.category,
-            "severity": self.severity,
-            "root_cause": self.root_cause,
-            "evidence": self.evidence,
-            "fix_plan": self.fix_plan,
-            "commands": self.commands,
-            "verification": self.verification,
-            "rollback": self.rollback,
-            "duration_ms": self.duration_ms,
+            "incident_id":          self.incident_id,
+            "diagnosis":            self.diagnosis,
+            "fix_plan":             self.fix_plan,
+            "commands":             self.commands,
+            "verification":         self.verification,
+            "rollback":             self.rollback,
+            "agent_1":              self.agent_1_solution,
+            "agent_2":              self.agent_2_solution,
+            "reconciliation_notes": self.reconciliation_notes,
+            "duration_ms":          self.duration_ms,
         }
 
     def summary(self) -> str:
         lines = [
-            f"=== RCA Report: {self.incident_id} ===",
-            f"Category:   {self.category}",
-            f"Severity:   {self.severity}",
-            f"Root Cause: {self.root_cause}",
+            f"=== RCA Result: {self.incident_id} ===",
             "",
-            "Evidence:",
+            "Diagnosis:",
+            f"  {self.diagnosis}",
+            "",
+            "Fix Plan:",
         ]
-        for source, detail in self.evidence.items():
-            lines.append(f"  [{source}] {detail}")
-        lines.append("")
-        lines.append("Fix Plan:")
-        for i, step in enumerate(self.fix_plan, 1):
-            lines.append(f"  {i}. {step}")
+        for i, s in enumerate(self.fix_plan, 1):
+            lines.append(f"  {i}. {s}")
         lines.append("")
         lines.append("Commands:")
-        for cmd in self.commands:
-            lines.append(f"  $ {cmd}")
+        for c in self.commands:
+            lines.append(f"  $ {c}")
         lines.append("")
         lines.append("Verification:")
         for v in self.verification:
@@ -73,123 +111,182 @@ class RCAReport:
         return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+ModelFn = Callable[[str], str]
+ModelLoader = Callable[[str, str], ModelFn]
+
+
 class Orchestrator:
-    """Coordinates the multi-agent RCA pipeline.
+    """Coordinates the four-agent RCA pipeline.
 
-    Workflow:
-      1. Triage Agent    → classify category + severity
-      2. Log Analyst     → extract log findings      } run in parallel
-         State Analyst   → extract state findings     }
-      3. Diagnostic Agent → synthesize root cause
-      4. Remediation Agent → generate fix plan
-
-    Each agent can operate in rule-based mode (no model) or
-    model-based mode (fine-tuned LLM injected at init).
+    Each model argument is a callable `prompt -> text` — swap in an Ollama,
+    vLLM, HF, or API client adapter. Use `from_role_defaults(loader)` to
+    wire the approved defaults in one call.
     """
 
     def __init__(
         self,
-        triage_model: Any = None,
-        log_model: Any = None,
-        state_model: Any = None,
-        diagnostic_model: Any = None,
-        remediation_model: Any = None,
+        *,
+        agent_1_model:    ModelFn | None = None,
+        agent_2_model:    ModelFn | None = None,
+        reconciler_model: ModelFn | None = None,
+        validator_model:  ModelFn | None = None,
         parallel: bool = True,
     ):
-        self.triage = TriageAgent(model=triage_model)
-        self.log_analyst = LogAnalystAgent(model=log_model)
-        self.state_analyst = StateAnalystAgent(model=state_model)
-        self.diagnostic = DiagnosticAgent(model=diagnostic_model)
-        self.remediation = RemediationAgent(model=remediation_model)
-        self.parallel = parallel
+        self.agent_1    = SolutionGeneratorAgent(name="agent_1", model=agent_1_model)
+        self.agent_2    = SolutionGeneratorAgent(name="agent_2", model=agent_2_model)
+        self.reconciler = ReconciliationAgent(model=reconciler_model)
+        self.validator  = ValidationAgent(model=validator_model)
+        self.parallel   = parallel
 
-    def analyze(self, incident: dict[str, Any]) -> RCAReport:
-        """Run the full RCA pipeline on a single incident."""
+    # -- Factory helpers ---------------------------------------------------
+
+    @classmethod
+    def from_bootstrap(
+        cls,
+        model_loader: ModelLoader,
+        *,
+        model: str = "qwen3.5:9b",
+        parallel: bool = True,
+    ) -> "Orchestrator":
+        """Wire a single model into all four agent slots.
+
+        Use this to exercise the pipeline end-to-end before all five
+        fine-tuned models are ready. Default is `qwen3.5:9b` — fast enough
+        for dev iteration, capable at RCA/reconciliation/validation.
+
+        Note: Agent 1 and Agent 2 will produce near-identical outputs in
+        bootstrap mode (same model, same prompt). That's fine for plumbing
+        tests; switch to `from_role_defaults` for real reasoning diversity.
+        """
+        call = model_loader("rca", model)
+        return cls(
+            agent_1_model    = call,
+            agent_2_model    = call,
+            reconciler_model = call,
+            validator_model  = call,
+            parallel         = parallel,
+        )
+
+    @classmethod
+    def from_role_defaults(
+        cls,
+        model_loader: ModelLoader,
+        *,
+        agent_1: str | None = None,
+        agent_2: str | None = None,
+        reconciler: str | None = None,
+        validator: str | None = None,
+        parallel: bool = True,
+    ) -> "Orchestrator":
+        """Build an orchestrator with the approved default model per role.
+
+        `model_loader(role, name)` is your model client adapter — it takes the
+        role ("rca" / "executor" / "validator") and a model name
+        (e.g. "qwen3.5:9b") and returns a callable `prompt -> text`.
+        """
+        names = {
+            "agent_1":    agent_1    or DEFAULT_PIPELINE["agent_1"],
+            "agent_2":    agent_2    or DEFAULT_PIPELINE["agent_2"],
+            "reconciler": reconciler or DEFAULT_PIPELINE["reconciler"],
+            "validator":  validator  or DEFAULT_PIPELINE["validator"],
+        }
+        role_of = {
+            "agent_1": "rca", "agent_2": "rca",
+            "reconciler": "executor", "validator": "validator",
+        }
+        for key, name in names.items():
+            role = role_of[key]
+            if name not in AGENT_ROLE_MODELS[role]:
+                raise ValueError(
+                    f"{name!r} is not an approved {role!r} model. "
+                    f"Allowed: {AGENT_ROLE_MODELS[role]}"
+                )
+
+        return cls(
+            agent_1_model    = model_loader("rca",       names["agent_1"]),
+            agent_2_model    = model_loader("rca",       names["agent_2"]),
+            reconciler_model = model_loader("executor",  names["reconciler"]),
+            validator_model  = model_loader("validator", names["validator"]),
+            parallel         = parallel,
+        )
+
+    # -- Pipeline ----------------------------------------------------------
+
+    def analyze(self, incident: dict[str, Any]) -> StructuredRCAResult:
+        """Run the full pipeline on one incident from k8s_combined_incidents.jsonl."""
         start = time.time()
-        incident_id = incident.get("id", "unknown")
+        incident_id = (
+            incident.get("id")
+            or incident.get("pod_name")
+            or incident.get("scenario_id", "unknown")
+        )
 
-        # --- Step 1: Triage ---
-        triage_result = self.triage.run(incident)
-        triage_findings = triage_result.findings
-
-        # --- Step 2: Parallel investigation ---
+        # --- Step 1: Agent 1 + Agent 2 generate candidate solutions ---
         if self.parallel:
-            log_result, state_result = self._run_parallel(incident)
+            agent_1_result, agent_2_result = self._run_generators_parallel(incident)
         else:
-            log_result = self.log_analyst.run(incident)
-            state_result = self.state_analyst.run(incident)
+            agent_1_result = self.agent_1.run(incident)
+            agent_2_result = self.agent_2.run(incident)
 
-        log_findings = log_result.findings
-        state_findings = state_result.findings
+        sol_1 = agent_1_result.findings
+        sol_2 = agent_2_result.findings
 
-        # --- Step 3: Diagnosis ---
-        # Inject intermediate results into incident for the diagnostic agent
-        incident["_triage_result"] = triage_findings
-        incident["_log_result"] = log_findings
-        incident["_state_result"] = state_findings
+        # --- Step 2: Reconciliation — pick/merge, produce fix plan + commands ---
+        incident["_agent_1_solution"] = sol_1
+        incident["_agent_2_solution"] = sol_2
+        reconciler_result = self.reconciler.run(incident)
+        reconciled = reconciler_result.findings
 
-        diag_result = self.diagnostic.run(incident)
-        diag_findings = diag_result.findings
-
-        # --- Step 4: Remediation ---
-        incident["_diagnostic_result"] = diag_findings
-
-        remed_result = self.remediation.run(incident)
-        remed_findings = remed_result.findings
+        # --- Step 3: Validation — verification + rollback ---
+        incident["_reconciled_solution"] = reconciled
+        validator_result = self.validator.run(incident)
+        validated = validator_result.findings
 
         # --- Clean up injected keys ---
-        for key in ("_triage_result", "_log_result", "_state_result", "_diagnostic_result"):
-            incident.pop(key, None)
+        for k in ("_agent_1_solution", "_agent_2_solution", "_reconciled_solution"):
+            incident.pop(k, None)
 
         duration_ms = (time.time() - start) * 1000
 
-        return RCAReport(
-            incident_id=incident_id,
-            category=triage_findings.get("category", "Unknown"),
-            severity=triage_findings.get("severity", "medium"),
-            root_cause=diag_findings.get("diagnosis", ""),
-            evidence={
-                "log_analysis": log_findings.get("summary", ""),
-                "state_analysis": state_findings.get("summary", ""),
+        return StructuredRCAResult(
+            incident_id          = incident_id,
+            diagnosis            = reconciled.get("diagnosis", ""),
+            fix_plan             = reconciled.get("fix_plan", []),
+            commands             = reconciled.get("commands", []),
+            verification         = validated.get("verification", []),
+            rollback             = validated.get("rollback", []),
+            agent_1_solution     = sol_1,
+            agent_2_solution     = sol_2,
+            reconciliation_notes = reconciled.get("notes", ""),
+            agent_results        = {
+                "agent_1":    agent_1_result,
+                "agent_2":    agent_2_result,
+                "reconciler": reconciler_result,
+                "validator":  validator_result,
             },
-            fix_plan=remed_findings.get("fix_plan", []),
-            commands=remed_findings.get("commands", []),
-            verification=remed_findings.get("verification", []),
-            rollback=remed_findings.get("rollback", []),
-            agent_results={
-                "triage": triage_result,
-                "log_analyst": log_result,
-                "state_analyst": state_result,
-                "diagnostic": diag_result,
-                "remediation": remed_result,
-            },
-            duration_ms=duration_ms,
+            duration_ms          = duration_ms,
         )
 
-    def _run_parallel(self, incident: dict[str, Any]) -> tuple[AgentResult, AgentResult]:
-        """Run log and state analysts in parallel."""
-        results: dict[str, AgentResult] = {}
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = {
-                pool.submit(self.log_analyst.run, incident): "log",
-                pool.submit(self.state_analyst.run, incident): "state",
-            }
-            for future in as_completed(futures):
-                name = futures[future]
-                results[name] = future.result()
-        return results["log"], results["state"]
-
     def analyze_batch(
-        self, incidents: list[dict[str, Any]], max_workers: int = 4
-    ) -> list[RCAReport]:
-        """Analyze multiple incidents in parallel."""
-        reports: list[RCAReport] = []
+        self,
+        incidents: list[dict[str, Any]],
+        max_workers: int = 4,
+    ) -> list[StructuredRCAResult]:
+        """Analyze multiple incidents in parallel (each incident still runs its
+        internal two RCA agents in parallel when self.parallel is True)."""
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(self.analyze, inc): i for i, inc in enumerate(incidents)}
-            indexed: list[tuple[int, RCAReport]] = []
-            for future in as_completed(futures):
-                idx = futures[future]
-                indexed.append((idx, future.result()))
-            indexed.sort(key=lambda x: x[0])
-            reports = [r for _, r in indexed]
-        return reports
+            return list(pool.map(self.analyze, incidents))
+
+    # -- Internals ---------------------------------------------------------
+
+    def _run_generators_parallel(
+        self, incident: dict[str, Any]
+    ) -> tuple[AgentResult, AgentResult]:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f1 = pool.submit(self.agent_1.run, incident)
+            f2 = pool.submit(self.agent_2.run, incident)
+            return f1.result(), f2.result()
