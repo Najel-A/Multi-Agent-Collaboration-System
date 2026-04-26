@@ -3,8 +3,8 @@
 The orchestrator is a **coordinator, not an agent itself** — it doesn't do any reasoning. Its only job is to:
 
 1. Run the right agents in the right order with the right data
-2. Pass each agent's output as input to the next
-3. Collect the pieces into the final structured result
+2. Move each agent's output to the next agent's input
+3. Bundle the pieces into the final structured result
 
 Think of it as a conductor: the musicians play, the conductor decides when.
 
@@ -12,7 +12,18 @@ Think of it as a conductor: the musicians play, the conductor decides when.
 
 ## The mental model in one paragraph
 
-An **incident** (a dict of fields from `k8s_combined_incidents.jsonl`) enters the orchestrator. It fans out to **two RCA agents running in parallel** (different models for reasoning diversity). Their two candidate diagnoses then fan in to a **single reconciliation agent** that picks or merges them and emits a fix plan plus commands. That reconciled output flows to a **single validation agent** that produces verification and rollback steps. The orchestrator bundles everything into a `StructuredRCAResult` and returns it. No agent ever talks to another directly — they all talk to the orchestrator, which passes messages between them by mutating a shared dict.
+An **incident** (a dict of fields from `k8s_combined_incidents.jsonl`) enters `Orchestrator.analyze()`. The orchestrator immediately deep-copies it so the caller's dict is never mutated. The copy fans out to **two RCA agents running in parallel** (different models for reasoning diversity). Their two candidate diagnoses fan in to a **single reconciliation agent** that picks or merges them and emits a fix plan plus commands. That reconciled output flows to a **single validation agent** which produces verification and rollback steps. The orchestrator bundles everything into a `StructuredRCAResult` — pending human approval before any command is executed — and returns it. No agent ever talks to another directly; they all talk to the orchestrator, which passes data through the work-copy dict.
+
+---
+
+## Safety contract
+
+Four guarantees `analyze()` provides to its caller:
+
+1. **Immutable input.** The orchestrator deep-copies the incident at the top of `analyze()`. Every scratch key (`_agent_1_solution`, etc.) is written on the copy. Concurrent calls in `analyze_batch()` cannot collide on a shared dict.
+2. **Bounded wall-time.** Each agent has a per-call cap (`agent_timeout_s`, default 60s) and the whole pipeline has a deadline (`total_timeout_s`, default 300s; per-request override available). Hung models can't stall the request indefinitely.
+3. **Graceful degradation.** Agent exceptions and timeouts never raise out of `analyze()`. They're captured in `result.errors`; the pipeline continues with whatever is available (one failed generator still lets the reconciler run).
+4. **Approval gate on commands.** `result.approval_status` starts at `"pending"`. `execute_commands(result, runner)` refuses to run unless the result has been explicitly approved via `result.approve(approver)`. There is no other sanctioned executor.
 
 ---
 
@@ -32,36 +43,40 @@ Each agent is a class with one method — `run(incident) -> AgentResult`. The or
 ## How data flows between them
 
 ```
-incident (dict)
+incident (caller's dict — read-only, never mutated)
     │
-    ├── orchestrator submits to ThreadPool  ─┐
-    │                                         │ parallel
-    ├── agent_1.run(incident) ─> diagnosis_1 ─┤
-    └── agent_2.run(incident) ─> diagnosis_2 ─┘
-                                         │
-    orchestrator writes:                 │
-      incident["_agent_1_solution"] = …  │ ← scratch keys
-      incident["_agent_2_solution"] = …  │   on the shared dict
-                                         ▼
-    reconciler.run(incident) ─> {diagnosis, fix_plan, commands, notes}
-                                         │
-    orchestrator writes:                 │
-      incident["_reconciled_solution"] = … │
-                                         ▼
-    validator.run(incident) ─> {verification, rollback}
-                                         │
-                                         ▼
-    orchestrator cleans up injected keys, bundles the outputs into
-    StructuredRCAResult, returns it.
+    │  analyze() does work = copy.deepcopy(incident)
+    ▼
+work
+    ├── daemon thread: agent_1.run(work) ─> diagnosis_1 ─┐
+    ├── daemon thread: agent_2.run(work) ─> diagnosis_2 ─┤  parallel
+    │      cap = min(agent_timeout_s, deadline - now)    │
+    │                                                    │
+    │   orchestrator writes (on the copy):               │
+    │     work["_agent_1_solution"] = …                  │
+    │     work["_agent_2_solution"] = …                  │
+    │                                                    ▼
+    │   reconciler.run(work) ─> {diagnosis, fix_plan, commands, notes}
+    │                                                    │
+    │   orchestrator writes (on the copy):               │
+    │     work["_reconciled_solution"] = …               │
+    │                                                    ▼
+    │   validator.run(work) ─> {verification, rollback}
+    │                                                    │
+    └────────────────────────────────────────────────────▼
+            StructuredRCAResult(
+              incident_id, diagnosis, fix_plan, commands,
+              verification, rollback,
+              errors=[…],                  ← any agent failures or timeouts
+              approval_status="pending",   ← gate before execution
+            )
 ```
 
 Three things to notice:
 
-1. **The agents share state via the incident dict.** Each agent reads from it; the orchestrator writes intermediate results into underscored "scratch" keys (`_agent_1_solution`, etc.) so the next agent can find them. At the end of `analyze()`, the orchestrator pops those keys back out — the caller's dict is left unchanged.
-
-2. **The orchestrator never parses model output.** That's the agents' job. The orchestrator only orchestrates — it knows the *shape* of each agent's output (e.g. "reconciler returns `{diagnosis, fix_plan, commands, notes}`"), not the model details.
-
-3. **Dependency is implicit in execution order.** `agents_1_2 → reconciler → validator` is encoded by the order of calls in `analyze()`. There's no DAG library, no graph compiler. If you wanted to add a step, you'd add 3-4 lines to `analyze()` and nothing else changes.
+1. **Scratch keys live on the copy.** The orchestrator never mutates the caller's incident. The `_agent_*_solution` keys are written and read on `work`, which is a `copy.deepcopy(incident)`.
+2. **Each agent runs on a daemon thread with a queue.** The orchestrator submits work via `threading.Thread(daemon=True)` and waits with `queue.get(timeout=cap)`. If a model hangs, the thread is orphaned (it'll exit when the underlying HTTP call's own timeout fires) and the pipeline records a timeout and continues. `ThreadPoolExecutor` was deliberately avoided here — its `__exit__` blocks on hung tasks.
+3. **The orchestrator never parses model output.** That's the agents' job. The orchestrator only knows the *shape* of each agent's output (e.g. "reconciler returns `{diagnosis, fix_plan, commands, notes}`"), not the model details.
 
 ---
 
@@ -79,34 +94,54 @@ A one-shot prompt "diagnose and fix this incident" has three problems this archi
 
 ## Where coordination actually happens
 
-Open `agents/orchestrator.py` and the whole coordinator is ~40 lines in `analyze()`:
+Open `agents/orchestrator.py` and the whole coordinator is one method, `analyze()`. Conceptually:
 
 ```python
-def analyze(self, incident):
-    # Step 1: Fan out — two RCA models in parallel
-    sol_1, sol_2 = self._run_generators_parallel(incident)
+def analyze(self, incident, *, approval_callback=None, total_timeout_s=None):
+    start = time.time()
+    effective_total = total_timeout_s or self.total_timeout_s
+    deadline = (start + effective_total) if effective_total is not None else None
 
-    # Step 2: Fan in — reconciler sees both + incident
-    incident["_agent_1_solution"] = sol_1
-    incident["_agent_2_solution"] = sol_2
-    reconciled = self.reconciler.run(incident).findings
+    # Defensive copy — caller's dict is never touched.
+    work = copy.deepcopy(incident)
+    errors: list[str] = []
 
-    # Step 3: Validator sees the reconciled plan
-    incident["_reconciled_solution"] = reconciled
-    validated = self.validator.run(incident).findings
+    # Step 1: Fan out — two RCA models in parallel,
+    # each capped at min(per-agent timeout, deadline - now).
+    a1, a2 = self._run_generators(work, errors, deadline)
+    sol_1 = self._findings_or_empty(a1)
+    sol_2 = self._findings_or_empty(a2)
 
-    # Clean up scratch keys; bundle result
-    ...
-    return StructuredRCAResult(
-        diagnosis=...,
-        fix_plan=...,
-        commands=...,
-        verification=...,
-        rollback=...,
+    # Step 2: Fan in — reconciler reads the two diagnoses + the incident.
+    work["_agent_1_solution"] = sol_1
+    work["_agent_2_solution"] = sol_2
+    rec = self._run_with_timeout(self.reconciler, work, "reconciler", errors, deadline)
+    reconciled = self._findings_or_empty(rec)
+
+    # Step 3: Validator emits verification + rollback.
+    work["_reconciled_solution"] = reconciled
+    val = self._run_with_timeout(self.validator, work, "validator", errors, deadline)
+    validated = self._findings_or_empty(val)
+
+    # Bundle. approval_status starts at "pending".
+    result = StructuredRCAResult(
+        incident_id=...,
+        diagnosis=reconciled.get("diagnosis", ""),
+        fix_plan=reconciled.get("fix_plan", []),
+        commands=reconciled.get("commands", []),
+        verification=validated.get("verification", []),
+        rollback=validated.get("rollback", []),
+        errors=errors,
     )
+
+    # Optional inline approval hook — flips to "approved" or "rejected".
+    if approval_callback and result.commands:
+        ...
+
+    return result
 ```
 
-That's the entire "orchestration". The complexity lives in the agents (prompts, parsing) and in the models (the reasoning). The orchestrator is deliberately boring — which is what makes it easy to test, swap backends, and add steps later.
+The complexity lives in the agents (prompts, parsing) and in the models (the reasoning). The orchestrator is deliberately boring — easy to test, easy to swap backends, easy to add steps to.
 
 ---
 
@@ -126,6 +161,5 @@ The orchestrator makes those three properties possible but doesn't embody any of
 
 ## Related reading
 
-- `docs/orchestrator_scenarios.md` — three end-to-end walkthroughs showing this flow for concrete error cases (missing Secret, bad ConfigMap key, bad image tag)
-- `docs/running_end_to_end.md` — how to actually run the pipeline via the FastAPI service and dashboard
+- `running_end_to_end.md` — how to run the inference service (`/analyze`, `/query`, `/health`, `/ready`)
 - `tests/test_orchestrator.py` — executable specification of these properties as assertions
