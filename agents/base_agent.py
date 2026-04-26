@@ -32,6 +32,17 @@ class BaseAgent(ABC):
     def run(self, incident: dict[str, Any]) -> AgentResult:
         """Analyse the incident and return findings."""
 
+    def bid(self, incident: dict[str, Any]) -> float:
+        """Confidence in [0, 1] that this agent can handle the incident.
+
+        Used by the Orchestrator's Contract Net protocol to select which
+        agents run for a given incident. Default returns 0.7 — competent
+        generalist. Specialists (e.g. NetworkingSpecialistAgent) override
+        this to return higher scores when the incident matches their
+        subdomain.
+        """
+        return 0.7
+
     def _build_prompt(self, incident: dict[str, Any]) -> str:
         """Build the prompt sent to the model. Override per agent."""
         return ""

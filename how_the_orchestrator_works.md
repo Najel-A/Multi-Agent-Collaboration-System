@@ -1,165 +1,303 @@
-# How the Orchestrator of Agents Works
+# How the Orchestrator Works (Plain English)
 
-The orchestrator is a **coordinator, not an agent itself** — it doesn't do any reasoning. Its only job is to:
-
-1. Run the right agents in the right order with the right data
-2. Move each agent's output to the next agent's input
-3. Bundle the pieces into the final structured result
-
-Think of it as a conductor: the musicians play, the conductor decides when.
+This document explains, without assuming you know how to code, what the orchestrator does and how it works step by step. There is one short technical appendix at the bottom for engineers; you can ignore it.
 
 ---
 
-## The mental model in one paragraph
+## What problem this solves
 
-An **incident** (a dict of fields from `k8s_combined_incidents.jsonl`) enters `Orchestrator.analyze()`. The orchestrator immediately deep-copies it so the caller's dict is never mutated. The copy fans out to **two RCA agents running in parallel** (different models for reasoning diversity). Their two candidate diagnoses fan in to a **single reconciliation agent** that picks or merges them and emits a fix plan plus commands. That reconciled output flows to a **single validation agent** which produces verification and rollback steps. The orchestrator bundles everything into a `StructuredRCAResult` — pending human approval before any command is executed — and returns it. No agent ever talks to another directly; they all talk to the orchestrator, which passes data through the work-copy dict.
+When something goes wrong inside Kubernetes (the system that runs containerized apps), engineers have to:
+
+1. Figure out **what** broke and **why** ("the diagnosis").
+2. Decide **what to do** to fix it ("the fix plan").
+3. Run the **specific commands** that perform the fix ("the actions").
+4. Confirm the **fix worked** ("verification").
+5. Have a **plan to undo it** if the fix made things worse ("rollback").
+
+This is high-stakes, fast, and requires expertise across many sub-areas (networking, storage, permissions, scheduling). One person — or one AI model — can miss things.
+
+The orchestrator is a software conductor that coordinates **a small team of specialized AI agents** to do this work together, in seconds, the same way a panel of human experts would.
 
 ---
 
-## Safety contract
+## The cast of characters
 
-Four guarantees `analyze()` provides to its caller:
+Think of the system as a small expert panel that meets briefly when an incident arrives. The members are:
 
-1. **Immutable input.** The orchestrator deep-copies the incident at the top of `analyze()`. Every scratch key (`_agent_1_solution`, etc.) is written on the copy. Concurrent calls in `analyze_batch()` cannot collide on a shared dict.
-2. **Bounded wall-time.** Each agent has a per-call cap (`agent_timeout_s`, default 60s) and the whole pipeline has a deadline (`total_timeout_s`, default 300s; per-request override available). Hung models can't stall the request indefinitely.
-3. **Graceful degradation.** Agent exceptions and timeouts never raise out of `analyze()`. They're captured in `result.errors`; the pipeline continues with whatever is available (one failed generator still lets the reconciler run).
-4. **Approval gate on commands.** `result.approval_status` starts at `"pending"`. `execute_commands(result, runner)` refuses to run unless the result has been explicitly approved via `result.approve(approver)`. There is no other sanctioned executor.
-
----
-
-## The four moving parts
-
-| Piece | Type | Lives in |
+| Role | What they do | Compare to a human… |
 |---|---|---|
-| **The Orchestrator** | a plain Python class — no LLM | `agents/orchestrator.py` |
-| **Solution Generators (×2)** | stateless classes wrapping a model callable | `agents/solution_generator_agent.py` |
-| **Reconciliation Agent** | same pattern | `agents/reconciliation_agent.py` |
-| **Validation Agent** | same pattern | `agents/validation_agent.py` |
+| **Triage** | Reads the incident, decides what kind of problem it is | The intake clerk at an ER |
+| **RCA Agent A** *(Qwen 3.5 9B)* | Proposes a diagnosis based on the evidence | First doctor's opinion |
+| **RCA Agent B** *(DeepSeek R1 8B)* | Independently proposes a diagnosis | Second doctor's opinion |
+| **Reconciler** *(Devstral 24B)* | Compares the two diagnoses, picks or merges them, writes the fix plan and the exact commands | Senior physician who decides treatment |
+| **Validator** *(Qwen 3.5 35B or Llama 3.2 3B)* | Decides how to verify the fix worked, and how to undo it if needed | Pharmacist double-checking the prescription |
+| **Specialists** *(optional)* | Networking expert, storage expert, RBAC expert, etc. | Sub-specialists called in when relevant |
 
-Each agent is a class with one method — `run(incident) -> AgentResult`. The orchestrator is what composes them.
+The Triage member never gives medical opinions — it just routes the case. The two RCA agents work **independently** so they don't influence each other. The Reconciler **arbitrates**. The Validator **checks**.
 
----
-
-## How data flows between them
-
-```
-incident (caller's dict — read-only, never mutated)
-    │
-    │  analyze() does work = copy.deepcopy(incident)
-    ▼
-work
-    ├── daemon thread: agent_1.run(work) ─> diagnosis_1 ─┐
-    ├── daemon thread: agent_2.run(work) ─> diagnosis_2 ─┤  parallel
-    │      cap = min(agent_timeout_s, deadline - now)    │
-    │                                                    │
-    │   orchestrator writes (on the copy):               │
-    │     work["_agent_1_solution"] = …                  │
-    │     work["_agent_2_solution"] = …                  │
-    │                                                    ▼
-    │   reconciler.run(work) ─> {diagnosis, fix_plan, commands, notes}
-    │                                                    │
-    │   orchestrator writes (on the copy):               │
-    │     work["_reconciled_solution"] = …               │
-    │                                                    ▼
-    │   validator.run(work) ─> {verification, rollback}
-    │                                                    │
-    └────────────────────────────────────────────────────▼
-            StructuredRCAResult(
-              incident_id, diagnosis, fix_plan, commands,
-              verification, rollback,
-              errors=[…],                  ← any agent failures or timeouts
-              approval_status="pending",   ← gate before execution
-            )
-```
-
-Three things to notice:
-
-1. **Scratch keys live on the copy.** The orchestrator never mutates the caller's incident. The `_agent_*_solution` keys are written and read on `work`, which is a `copy.deepcopy(incident)`.
-2. **Each agent runs on a daemon thread with a queue.** The orchestrator submits work via `threading.Thread(daemon=True)` and waits with `queue.get(timeout=cap)`. If a model hangs, the thread is orphaned (it'll exit when the underlying HTTP call's own timeout fires) and the pipeline records a timeout and continues. `ThreadPoolExecutor` was deliberately avoided here — its `__exit__` blocks on hung tasks.
-3. **The orchestrator never parses model output.** That's the agents' job. The orchestrator only knows the *shape* of each agent's output (e.g. "reconciler returns `{diagnosis, fix_plan, commands, notes}`"), not the model details.
+Behind the scenes, a software component called the **Orchestrator** runs the meeting. It doesn't have an opinion — it makes sure the right people are heard at the right time and that the meeting ends with a clear recommendation.
 
 ---
 
-## Why this shape instead of a single monolithic prompt
+## The shared whiteboard
 
-A one-shot prompt "diagnose and fix this incident" has three problems this architecture solves:
+The most important piece is something called a **Blackboard**. Think of a whiteboard in the middle of the room that everyone can see and write on. Whenever someone says something important, it goes up on the whiteboard with their name and a timestamp.
 
-| Problem | How the orchestrator fixes it |
+The whiteboard has labeled sections (called "topics"):
+
+| Section on the whiteboard | What goes here |
 |---|---|
-| **Self-confirmation bias** — a model that proposes a fix tends to validate its own fix | Validator runs as a *separate* model, doesn't see its own reasoning as input |
-| **Single-point-of-failure reasoning** — if the model misreads the describe, the whole answer is wrong | Two RCA models in parallel; the reconciler compares them and records which was preferred |
-| **Model capability mismatch** — one model isn't best at prose, code, and judgment | `qwen3.5:9b` (general) + `deepseek-r1:8b` (reasoning) → `devstral-small-2:24b` (code) → `qwen3.5:35b` (judgment). Each role gets a model tuned for it. |
+| `incident` | The incoming problem description |
+| `bid_request` | "Who can handle this?" |
+| `bid` | Each agent's confidence score, "I'm 0.95 sure I can help" |
+| `dispatch` | The Orchestrator's announcement of who got picked |
+| `diagnosis` | Each picked agent's proposed diagnosis |
+| `conflict` | Posted only when two diagnoses meaningfully disagree |
+| `fix_plan` | The Reconciler's final fix plan + exact commands |
+| `validation` | The Validator's verification + rollback steps |
+
+This whiteboard is wiped clean for each new incident. Everything written on it during the meeting is saved as the **trace** — a complete record of who said what, in what order, when. That trace is included in the final answer so a human can audit every decision.
 
 ---
 
-## Where coordination actually happens
+## The meeting, step by step
 
-Open `agents/orchestrator.py` and the whole coordinator is one method, `analyze()`. Conceptually:
+Here is how one incident is handled, end to end. Every numbered step happens automatically; the "meeting" usually finishes in 10–30 seconds.
 
-```python
-def analyze(self, incident, *, approval_callback=None, total_timeout_s=None):
-    start = time.time()
-    effective_total = total_timeout_s or self.total_timeout_s
-    deadline = (start + effective_total) if effective_total is not None else None
+### Step 1 — Incident arrives
 
-    # Defensive copy — caller's dict is never touched.
-    work = copy.deepcopy(incident)
-    errors: list[str] = []
+Something calls the orchestrator with an incident. Example:
 
-    # Step 1: Fan out — two RCA models in parallel,
-    # each capped at min(per-agent timeout, deadline - now).
-    a1, a2 = self._run_generators(work, errors, deadline)
-    sol_1 = self._findings_or_empty(a1)
-    sol_2 = self._findings_or_empty(a2)
+> *"A pod called worker-vkz64 is stuck in 'ImagePullBackOff' because it can't find the image tag v9.9.9 in the registry."*
 
-    # Step 2: Fan in — reconciler reads the two diagnoses + the incident.
-    work["_agent_1_solution"] = sol_1
-    work["_agent_2_solution"] = sol_2
-    rec = self._run_with_timeout(self.reconciler, work, "reconciler", errors, deadline)
-    reconciled = self._findings_or_empty(rec)
+The Orchestrator copies the incident (so the original is never modified) and posts it on the **whiteboard** under `incident`.
 
-    # Step 3: Validator emits verification + rollback.
-    work["_reconciled_solution"] = reconciled
-    val = self._run_with_timeout(self.validator, work, "validator", errors, deadline)
-    validated = self._findings_or_empty(val)
+### Step 2 — Triage routes the incident
 
-    # Bundle. approval_status starts at "pending".
-    result = StructuredRCAResult(
-        incident_id=...,
-        diagnosis=reconciled.get("diagnosis", ""),
-        fix_plan=reconciled.get("fix_plan", []),
-        commands=reconciled.get("commands", []),
-        verification=validated.get("verification", []),
-        rollback=validated.get("rollback", []),
-        errors=errors,
-    )
+The Triage member reads the incident and notices the failure type is **`ImagePullBackOff`**. It posts a "bid request" on the whiteboard saying:
 
-    # Optional inline approval hook — flips to "approved" or "rejected".
-    if approval_callback and result.commands:
-        ...
+> "Looking for an RCA expert who handles `ImagePullBackOff`."
 
-    return result
+### Step 3 — Bidding round
+
+Every RCA expert in the room raises a hand and writes their **confidence score** on the whiteboard:
+
+| Agent | Confidence | Why |
+|---|---|---|
+| **RCA Agent A** (general) | 0.70 | "I'm a generalist, I can probably help" |
+| **RCA Agent B** (general) | 0.70 | "Same — I'm a generalist" |
+| **Networking Specialist** *(if present)* | 0.95 | "ImagePullBackOff is exactly my subdomain" |
+
+### Step 4 — Dispatch
+
+The Orchestrator picks the **top two** bidders (always two, for diversity — even when one is much higher than the others). It posts the picks on the whiteboard under `dispatch`.
+
+In our example: **Networking Specialist** (0.95) and **RCA Agent B** (0.70).
+
+### Step 5 — The two picked agents reason in parallel
+
+Both agents read the incident from the whiteboard and **work independently** — they do not see each other's work. Each posts a candidate diagnosis under `diagnosis`:
+
+> *Networking Specialist*: *"Image tag v9.9.9 does not exist in the registry. The deployment was probably updated to a tag that was never published."*
+
+> *RCA Agent B*: *"The 'manifest unknown' error usually means the requested tag is not in the registry — this is a tag mismatch, not an authentication problem."*
+
+### Step 6 — Conflict check
+
+The Orchestrator compares the two diagnoses. If they overlap a lot (both say "tag missing"), they agree, and we move on. If they disagree, the Orchestrator posts a `conflict` message — a record that there were two competing answers that needed arbitration.
+
+In our example, they agree. No conflict posted.
+
+### Step 7 — Reconciliation
+
+The **Reconciler** (Devstral 24B) reads both diagnoses, the original incident, and the conflict signal (if any). It writes:
+
+- A **single** unified diagnosis
+- A numbered **fix plan**
+- The **exact commands** (e.g., `kubectl set image deployment/worker worker=myreg.io/worker:v9.5.2`)
+- **Notes** about which candidate it preferred and why
+
+This is posted under `fix_plan`.
+
+### Step 8 — Validation
+
+The **Validator** (Qwen 3.5 35B for high-quality, or Llama 3.2 3B for fast) reads the fix plan and produces:
+
+- **Verification** — checks to confirm the fix worked ("the pod transitions from Pending to Running")
+- **Rollback** — steps to undo the fix if it causes new problems
+
+This is posted under `validation`.
+
+### Step 9 — Bundle and return
+
+The Orchestrator gathers everything from the whiteboard and produces the final result:
+
+- The diagnosis
+- The fix plan
+- The commands
+- The verification steps
+- The rollback steps
+- A complete **audit trail** (every message that appeared on the whiteboard, in order)
+- An **approval flag** set to **PENDING** — meaning, no human has yet approved the commands to actually run
+
+The result is returned to whoever called the system.
+
+---
+
+## The safety rules
+
+The orchestrator follows four hard rules, every time:
+
+1. **No surprise mutations.** It works on its own copy of the incident; the caller's data is never altered.
+2. **Bounded time.** Each agent gets at most 60 seconds; the whole meeting gets at most 5 minutes (configurable). If a model hangs, the meeting still ends.
+3. **Failures are noted, not crashes.** If one agent fails or times out, the others continue. Failures are recorded in an `errors` field on the result.
+4. **No commands run without human approval.** The fix commands are produced as text only. They are tagged **PENDING APPROVAL**. A separate, deliberate step (`approve()` then `execute_commands()`) is required to actually run any of them. There is no other path.
+
+---
+
+## Picture of the workflow
+
+```
+                          ┌─────────────────────────┐
+   Incident ─────────────►│       Orchestrator       │
+   (e.g. "pod stuck in    │  (runs the meeting)      │
+   ImagePullBackOff")     └────────────┬────────────┘
+                                       │ posts everything to:
+                                       ▼
+            ┌──────────────────────────────────────────────┐
+            │                Whiteboard                     │
+            │  ─ incident ─ bid_request ─ bid ─ dispatch  │
+            │  ─ diagnosis ─ conflict ─ fix_plan ─ validation │
+            └──────┬──────────┬──────────┬──────────┬─────┘
+                   │          │          │          │
+              ┌────▼───┐ ┌────▼────┐ ┌───▼────┐ ┌──▼────┐
+              │ Triage │ │ RCA A/B │ │Reconcile│ │Validate│
+              │ (route)│ │  (diag) │ │ (plan)  │ │(verify)│
+              └────────┘ └─────────┘ └────────┘ └───────┘
+
+   Result returned to caller:  diagnosis + fix plan + commands + verify
+                              + rollback + complete audit trail
+                              + approval_status = "PENDING"
 ```
 
-The complexity lives in the agents (prompts, parsing) and in the models (the reasoning). The orchestrator is deliberately boring — easy to test, easy to swap backends, easy to add steps to.
+---
+
+## What "specialists" are
+
+The default cast has two general-purpose RCA agents (A and B). The architecture also lets you add **specialists** — agents that are extra-confident on specific kinds of K8s incidents.
+
+Examples of specialists you could add:
+
+| Specialist | Best at handling | How it bids |
+|---|---|---|
+| **Networking** | ImagePullBackOff, DNS issues, service mesh, ingress | 0.95 if event mentions image-pull or DNS, otherwise 0.0 |
+| **RBAC** | Forbidden / Unauthorized errors, missing service accounts | 0.95 if event is "Forbidden", otherwise 0.0 |
+| **Storage** | Missing PersistentVolumeClaim, mount failures | 0.95 if event is FailedMount or PVCNotFound |
+| **Scheduling** | FailedScheduling, taints, resource limits | 0.95 if pod is unschedulable |
+
+Specialists do not require their own trained model — each one shares one of the existing five models, but uses a custom prompt and bid logic. Adding one is a few lines of code (see the engineering appendix).
+
+When specialists are present, the bidding round has real meaning: a Networking incident gets the Networking specialist plus one generalist. A storage incident gets the Storage specialist plus one generalist. The system **dynamically chooses who works on each incident** instead of using the same two agents every time.
 
 ---
 
-## What makes it "multi-agent" vs. just "multiple model calls"
+## Why this is a useful design
 
-Three properties:
+Three properties make this a "multi-agent" system, not just "one model called four times":
 
-1. **Role specialization.** Each agent has a distinct purpose (diagnose / reconcile / validate) with its own prompt, its own parser, its own model choice. They're not interchangeable.
+1. **Specialization.** Each role has a specific job, with its own prompt, parser, and (often) a different model tuned for that job.
+2. **Independent reasoning.** The two RCA agents don't see each other's work — when they agree, that's a strong signal; when they disagree, the system records the disagreement and arbitrates explicitly.
+3. **Arbitration.** A separate Reconciler agent compares and merges. Most "ensemble" approaches just average outputs; this system **reasons about** them.
 
-2. **Independent reasoning.** Agents 1 and 2 don't see each other's output — they analyze the incident independently. Their disagreements are *signal*, not noise.
-
-3. **Arbitration.** The reconciler is a distinct agent whose only job is to compare and merge. That's what distinguishes "multi-agent" from "ensemble" — ensembles average outputs, multi-agent systems *reason about* them.
-
-The orchestrator makes those three properties possible but doesn't embody any of them. It's the scaffolding. The intelligence is in the agents.
+Together, these reduce the chance of self-confirming errors (where a model that proposes a wrong fix also validates it) and make the audit trail show **why** every decision was made.
 
 ---
 
-## Related reading
+## What if something fails?
 
-- `running_end_to_end.md` — how to run the inference service (`/analyze`, `/query`, `/health`, `/ready`)
-- `tests/test_orchestrator.py` — executable specification of these properties as assertions
+| What can fail | What happens |
+|---|---|
+| One RCA agent times out | The other one's diagnosis is used; the failure is recorded in `errors` |
+| Both RCA agents time out | The reconciler runs with empty inputs and produces an empty plan; the result clearly shows nothing usable was generated |
+| The reconciler fails | The validator runs with no plan; the result has empty `commands` |
+| The model server is unreachable | A separate `/ready` health probe fails before traffic is sent |
+| Someone tries to execute commands without approval | The system raises `CommandsNotApprovedError` — execution is impossible without the explicit approval step |
+
+You will always get a result back, you will always be able to see exactly what happened in the trace, and nothing destructive can happen by accident.
+
+---
+
+## How long does this take?
+
+| Backend | Typical end-to-end | What dominates the time |
+|---|---|---|
+| Stub responses (built-in) | ~10 ms | Nothing real runs; useful for testing the plumbing |
+| Local Ollama (one GPU) | ~10–30 s | The four model calls; cold starts can add another 30 s |
+| vLLM cluster (one GPU per model) | ~5–15 s | The slowest of the four parallel/sequential calls |
+
+The two RCA agents run in parallel, so adding the second one doesn't roughly double the time — it adds at most the slower of the two.
+
+---
+
+## What this system is NOT
+
+To set expectations:
+
+- **It is not autonomous.** It does not run kubectl commands by itself. Every command requires a human approval before execution.
+- **It is not a replacement for an SRE.** It produces an opinionated recommendation. A trained engineer should review the diagnosis and especially the commands before approving.
+- **It does not learn from a single run.** Improvements come from re-training the underlying models on new examples, not from in-flight feedback.
+- **It is not infallible.** Like any LLM-driven system, it can be wrong. The two-agent + reconciler design and the audit trail are there to help humans catch errors faster, not to claim the system never makes them.
+
+---
+
+## Engineering appendix
+
+For developers — short reference. Skip this if you're a non-technical reader.
+
+**Pattern.** Blackboard system + Contract Net Lite + a centralized protocol runner. Reference: Hayes-Roth 1985 (Blackboards), Smith 1980 (Contract Net).
+
+**Key files.**
+- `agents/blackboard.py` — `Blackboard`, `Message`, `Topics`. Thread-safe pub/sub.
+- `agents/registry.py` — `AgentRegistry`, `Capability`. Discovery by role and handles match.
+- `agents/triage_agent.py` — Model-free routing.
+- `agents/orchestrator.py` — `Orchestrator.analyze()` runs the protocol; `add_specialist()` registers new RCA experts.
+- `agents/{base,solution_generator,reconciliation,validation}_agent.py` — The four core agents.
+
+**Public API (unchanged from the previous shape).**
+```python
+from agents.orchestrator import Orchestrator
+from agents.model_loaders import ollama_loader
+
+orch = Orchestrator.from_role_defaults(ollama_loader())
+result = orch.analyze(incident_dict)
+print(result.diagnosis, result.fix_plan, result.commands)
+print(result.trace)  # full audit log
+```
+
+**Adding a specialist.**
+```python
+from agents.solution_generator_agent import SolutionGeneratorAgent
+from agents.registry import Capability
+
+class NetworkingSpecialistAgent(SolutionGeneratorAgent):
+    def bid(self, incident):
+        reason = (incident.get("event_reason") or "").lower()
+        msg    = (incident.get("event_message") or "").lower()
+        if "imagepull" in reason or "manifest unknown" in msg:
+            return 0.95
+        if "dns" in msg or "service mesh" in msg:
+            return 0.85
+        return 0.0
+
+orch.add_specialist(
+    NetworkingSpecialistAgent(name="networking", model=ollama_call),
+    Capability(role="rca",
+               handles={"ImagePullBackOff", "ErrImagePull",
+                        "DNSResolution", "FailedCreatePodSandBox"}),
+)
+```
+
+**Tests.** `tests/test_orchestrator.py` — 18 tests covering the full pipeline plus stub end-to-end and live Ollama gating. Run with `python3 tests/test_orchestrator.py`.
+
+**Related reading.**
+- `running_end_to_end.md` — how to deploy and call the inference service.

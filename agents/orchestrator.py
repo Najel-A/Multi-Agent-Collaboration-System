@@ -1,21 +1,33 @@
 """Orchestrator — multi-agent RCA pipeline.
 
-Pipeline (matches the architecture diagram):
+Pattern: Blackboard (shared memory bus) + Contract Net Lite (agents
+bid for incidents) + a centralized protocol runner that advances the
+rounds and bundles the result. The four classical stages still happen
+under the hood:
 
     Incident
         │
-        ├──► Agent 1 Solution Generator   (RCA: qwen3.5:9b)
-        └──► Agent 2 Solution Generator   (RCA: deepseek-r1:8b)
+        ▼
+    Triage          → posts a "handles" tag for routing
+        │
+        ▼
+    Bidding round   → eligible RCA agents post confidence scores
+        │
+        ▼
+    Top-2 dispatch  → the two best bidders run in parallel
+        │
+        ├──► Agent A diagnosis  ─┐
+        └──► Agent B diagnosis  ─┤  (low similarity → conflict signal)
                          │
                          ▼
-        Decision / Reconciliation Agent   (Executor: devstral-small-2:24b)
+        Decision / Reconciliation Agent  → diagnosis + fix_plan + commands
                          │
                          ▼
-               Validation Agent           (Validator: qwen3.5:35b | llama3.2:3b)
+              Validation Agent           → verification + rollback
                          │
                          ▼
              Structured RCA Result
-        (diagnosis / fix_plan / commands / verification / rollback)
+        (incl. trace = full Blackboard log)
 
 Safety contract:
     - The input incident dict is never mutated — analyze() works on a deep copy.
@@ -27,6 +39,10 @@ Safety contract:
       them. analyze(approval_callback=...) provides an inline approval hook;
       execute_commands() is the only sanctioned executor and refuses unless
       the result has been approved.
+
+Public surface unchanged: callers still build the Orchestrator with the
+same constructor or factories and call analyze(incident) the same way.
+The Blackboard / Registry / Triage live behind that surface.
 
 Data source: data/02-raw/k8s_combined_incidents.jsonl (flat 20-field schema).
 SFT data:    data/sft/{rca,executor,validator}_*.jsonl (see
@@ -41,10 +57,13 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
-from agents.base_agent import AgentResult
+from agents.base_agent import AgentResult, BaseAgent
+from agents.blackboard import Blackboard, Message, Topics
+from agents.registry import AgentRegistry, Capability, RegisteredAgent
 from agents.solution_generator_agent import SolutionGeneratorAgent
 from agents.reconciliation_agent import ReconciliationAgent
 from agents.validation_agent import ValidationAgent
+from agents.triage_agent import TriageAgent
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +98,10 @@ class StructuredRCAResult:
     Commands are advisory until approval_status flips to "approved" via
     approve(). execute_commands() refuses to run while status is "pending"
     or "rejected" — the only sanctioned execution path goes through that gate.
+
+    `trace` is the chronological audit log of every Blackboard message
+    written during analyze(). Useful for demos and debugging; safe to
+    ignore or strip for production callers that don't need it.
     """
     incident_id: str
     diagnosis: str
@@ -95,6 +118,7 @@ class StructuredRCAResult:
     approval_status: ApprovalStatus = "pending"
     approver: str | None = None
     approval_note: str = ""
+    trace: list[dict[str, Any]] = field(default_factory=list)
 
     def approve(self, approver: str, note: str = "") -> None:
         if not approver:
@@ -128,6 +152,7 @@ class StructuredRCAResult:
             "approval_status":      self.approval_status,
             "approver":             self.approver,
             "approval_note":        self.approval_note,
+            "trace":                self.trace,
         }
 
     def summary(self) -> str:
@@ -184,7 +209,10 @@ class CommandsNotApprovedError(PermissionError):
 
 
 class Orchestrator:
-    """Coordinates the four-agent RCA pipeline.
+    """Coordinates the multi-agent RCA pipeline via a Blackboard + Contract Net.
+
+    The default cast (agent_1, agent_2, reconciler, validator) is registered
+    automatically. Specialists can be added via add_specialist().
 
     Each model argument is a callable `prompt -> text` — swap in an Ollama,
     vLLM, HF, or API client adapter. Use `from_role_defaults(loader)` to
@@ -213,9 +241,55 @@ class Orchestrator:
         self.agent_2    = SolutionGeneratorAgent(name="agent_2", model=agent_2_model)
         self.reconciler = ReconciliationAgent(model=reconciler_model)
         self.validator  = ValidationAgent(model=validator_model)
+        self.triage     = TriageAgent()
+
+        # Default registry. RCA generators bid on every incident (handles="*").
+        # Add specialists with add_specialist() to make bidding non-trivial.
+        self.registry = AgentRegistry()
+        self.registry.register(self.agent_1, Capability(role="rca", handles={"*"}, cost=1.0))
+        self.registry.register(self.agent_2, Capability(role="rca", handles={"*"}, cost=1.0))
+        self.registry.register(self.reconciler, Capability(role="executor", handles={"*"}))
+        self.registry.register(self.validator, Capability(role="validator", handles={"*"}))
+        self.registry.register(self.triage, Capability(role="triage", handles={"*"}, cost=0.0))
+
         self.parallel   = parallel
         self.agent_timeout_s = agent_timeout_s
         self.total_timeout_s = total_timeout_s
+
+    # -- Specialist registration ------------------------------------------
+
+    def add_specialist(self, agent: BaseAgent, capability: Capability) -> None:
+        """Register an additional RCA specialist (e.g. networking, RBAC, storage).
+
+        The agent's bid() method (or the capability's handles match against the
+        incident's event_reason) determines whether it is selected for a given
+        run. Specialists compete with the two default generators in the bidding
+        round; selection picks the top-2 bidders for diversity.
+
+        Example:
+            from agents.solution_generator_agent import SolutionGeneratorAgent
+            from agents.registry import Capability
+
+            class NetworkingSpecialistAgent(SolutionGeneratorAgent):
+                def bid(self, incident):
+                    reason = (incident.get("event_reason") or "").lower()
+                    msg    = (incident.get("event_message") or "").lower()
+                    if "imagepull" in reason or "manifest unknown" in msg:
+                        return 0.95
+                    return 0.0
+
+            orch.add_specialist(
+                NetworkingSpecialistAgent(name="networking", model=ollama_call),
+                Capability(role="rca",
+                           handles={"ImagePullBackOff", "ErrImagePull",
+                                    "DNSResolution", "FailedCreatePodSandBox"}),
+            )
+        """
+        if capability.role != "rca":
+            raise ValueError(
+                f"add_specialist only accepts role='rca', got {capability.role!r}"
+            )
+        self.registry.register(agent, capability)
 
     # -- Factory helpers ---------------------------------------------------
 
@@ -319,8 +393,7 @@ class Orchestrator:
         and the caller MUST approve before any command is executed.
 
         total_timeout_s (optional): per-request override of the orchestrator's
-        configured pipeline timeout. Lets API callers (e.g. the LSA-WebApp's
-        `max_time` field) supply a deadline for this single invocation.
+        configured pipeline timeout.
         """
         start = time.time()
         effective_total = (
@@ -334,6 +407,9 @@ class Orchestrator:
             else None
         )
 
+        # Per-request blackboard.
+        bb = Blackboard()
+
         # Defensive copy — the caller's dict is untouched, and concurrent
         # invocations (e.g. analyze_batch) can't stomp each other's keys.
         work = copy.deepcopy(incident)
@@ -345,27 +421,103 @@ class Orchestrator:
         )
         errors: list[str] = []
 
-        # --- Step 1: Agent 1 + Agent 2 generate candidate solutions ---
-        agent_1_result, agent_2_result = self._run_generators(
-            work, errors, deadline,
-        )
-        sol_1 = self._findings_or_empty(agent_1_result)
-        sol_2 = self._findings_or_empty(agent_2_result)
+        # --- Phase 1: post the incident to the bus ---
+        bb.write(Message(
+            topic=Topics.INCIDENT, sender="orchestrator", payload=work,
+        ))
 
-        # --- Step 2: Reconciliation — pick/merge, produce fix plan + commands ---
+        # --- Phase 1b: Triage decides the dispatch handles tag ---
+        triage_result = self.triage.run(work)
+        handles = triage_result.findings.get("handles") or "*"
+        bb.write(Message(
+            topic=Topics.BID_REQUEST, sender=self.triage.name,
+            payload={"handles": handles, "incident_id": incident_id},
+        ))
+
+        # --- Phase 2: Contract Net — collect bids from RCA candidates ---
+        candidates = self.registry.discover(role="rca", handles=handles)
+        bids: list[tuple[RegisteredAgent, float]] = []
+        for r in candidates:
+            try:
+                score = float(r.agent.bid(work))
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{r.agent.name}: bid failed: {e!r}")
+                score = 0.0
+            score = max(0.0, min(1.0, score))
+            bids.append((r, score))
+            bb.write(Message(
+                topic=Topics.BID, sender=r.agent.name,
+                payload={"score": score, "handles": sorted(r.capability.handles)},
+            ))
+
+        # Filter by per-capability confidence floor; sort by (-score, cost).
+        bids = [(r, s) for r, s in bids if s >= r.capability.confidence_floor]
+        bids.sort(key=lambda x: (-x[1], x[0].capability.cost))
+
+        # Top-2 for diversity. (If only one candidate, run the single one.)
+        selected_agents = [r.agent for r, _ in bids[:2]]
+        bb.write(Message(
+            topic=Topics.DISPATCH, sender="orchestrator",
+            payload={"selected": [a.name for a in selected_agents]},
+        ))
+
+        # --- Phase 3: dispatched RCA agents run (in parallel by default) ---
+        if not selected_agents:
+            errors.append("dispatch: no eligible RCA agents for this incident")
+            diagnosis_results: list[AgentResult] = []
+        else:
+            diagnosis_results = self._run_agents(
+                selected_agents, work, errors, deadline,
+            )
+
+        for r in diagnosis_results:
+            bb.write(Message(
+                topic=Topics.DIAGNOSIS, sender=r.agent_name,
+                payload=r.findings if r.status == "success" else {},
+            ))
+
+        # Pad to length 2 to keep the result schema stable across selection sizes.
+        while len(diagnosis_results) < 2:
+            diagnosis_results.append(AgentResult(
+                agent_name=f"slot_{len(diagnosis_results) + 1}",
+                status="error",
+                error="no agent dispatched to this slot",
+            ))
+
+        sol_1 = self._findings_or_empty(diagnosis_results[0])
+        sol_2 = self._findings_or_empty(diagnosis_results[1])
+
+        # --- Phase 3b: detect conflict (audit signal; reconciler runs anyway) ---
+        if sol_1.get("diagnosis") and sol_2.get("diagnosis"):
+            if self._diagnoses_disagree(sol_1, sol_2):
+                bb.write(Message(
+                    topic=Topics.CONFLICT, sender="orchestrator",
+                    payload={
+                        "diag_a": sol_1.get("diagnosis", ""),
+                        "diag_b": sol_2.get("diagnosis", ""),
+                    },
+                ))
+
+        # --- Phase 3c: Reconciliation — pick/merge, produce fix plan + commands ---
         work["_agent_1_solution"] = sol_1
         work["_agent_2_solution"] = sol_2
         reconciler_result = self._run_with_timeout(
             self.reconciler, work, "reconciler", errors, deadline,
         )
         reconciled = self._findings_or_empty(reconciler_result)
+        bb.write(Message(
+            topic=Topics.FIX_PLAN, sender=self.reconciler.name, payload=reconciled,
+        ))
 
-        # --- Step 3: Validation — verification + rollback ---
+        # --- Phase 4: Validation — verification + rollback ---
         work["_reconciled_solution"] = reconciled
         validator_result = self._run_with_timeout(
             self.validator, work, "validator", errors, deadline,
         )
         validated = self._findings_or_empty(validator_result)
+        bb.write(Message(
+            topic=Topics.VALIDATION, sender=self.validator.name, payload=validated,
+        ))
 
         duration_ms = (time.time() - start) * 1000
 
@@ -380,13 +532,14 @@ class Orchestrator:
             agent_2_solution     = sol_2,
             reconciliation_notes = reconciled.get("notes", ""),
             agent_results        = {
-                "agent_1":    agent_1_result,
-                "agent_2":    agent_2_result,
+                "agent_1":    diagnosis_results[0],
+                "agent_2":    diagnosis_results[1],
                 "reconciler": reconciler_result,
                 "validator":  validator_result,
             },
             duration_ms          = duration_ms,
             errors               = errors,
+            trace                = [m.to_dict() for m in bb.trace()],
         )
 
         if approval_callback is not None and result.commands:
@@ -418,53 +571,52 @@ class Orchestrator:
 
     # -- Internals ---------------------------------------------------------
 
-    def _run_generators(
+    def _run_agents(
         self,
+        agents: list[BaseAgent],
         incident: dict[str, Any],
         errors: list[str],
         deadline: float | None,
-    ) -> tuple[AgentResult, AgentResult]:
-        if not self.parallel:
-            r1 = self._run_with_timeout(
-                self.agent_1, incident, "agent_1", errors, deadline,
-            )
-            r2 = self._run_with_timeout(
-                self.agent_2, incident, "agent_2", errors, deadline,
-            )
-            return r1, r2
+    ) -> list[AgentResult]:
+        """Run the given agents (parallel if self.parallel, else sequential).
+
+        Each agent runs in a daemon thread with a queue, so a hung model
+        cannot block the pipeline beyond the per-agent / total deadline.
+        """
+        if not self.parallel or len(agents) <= 1:
+            return [
+                self._run_with_timeout(a, incident, a.name, errors, deadline)
+                for a in agents
+            ]
 
         cap = self._agent_cap(deadline)
         if cap is not None and cap <= 0:
             msg = "generators: skipped — pipeline deadline exceeded"
             errors.append(msg)
-            return (
-                AgentResult(agent_name="agent_1", status="error", error=msg),
-                AgentResult(agent_name="agent_2", status="error", error=msg),
+            return [
+                AgentResult(agent_name=a.name, status="error", error=msg)
+                for a in agents
+            ]
+
+        queues = [queue.Queue(maxsize=1) for _ in agents]
+        for a, q in zip(agents, queues):
+            t = threading.Thread(
+                target=self._run_into_queue,
+                args=(a, incident, q),
+                name=f"rca-{a.name}",
+                daemon=True,
             )
+            t.start()
 
-        q1: "queue.Queue[Any]" = queue.Queue(maxsize=1)
-        q2: "queue.Queue[Any]" = queue.Queue(maxsize=1)
-        t1 = threading.Thread(
-            target=self._run_into_queue,
-            args=(self.agent_1, incident, q1),
-            name="rca-agent_1",
-            daemon=True,
-        )
-        t2 = threading.Thread(
-            target=self._run_into_queue,
-            args=(self.agent_2, incident, q2),
-            name="rca-agent_2",
-            daemon=True,
-        )
-        t1.start()
-        t2.start()
-
+        results: list[AgentResult] = []
         wait_start = time.time()
-        r1 = self._await_queue(q1, "agent_1", cap, errors)
-        elapsed = time.time() - wait_start
-        r2_cap = max(cap - elapsed, 0.0) if cap is not None else None
-        r2 = self._await_queue(q2, "agent_2", r2_cap, errors)
-        return r1, r2
+        for a, q in zip(agents, queues):
+            elapsed = time.time() - wait_start
+            remaining_cap = (
+                max(cap - elapsed, 0.0) if cap is not None else None
+            )
+            results.append(self._await_queue(q, a.name, remaining_cap, errors))
+        return results
 
     def _run_with_timeout(
         self,
@@ -539,6 +691,25 @@ class Orchestrator:
         if result.status == "success" and result.findings:
             return result.findings
         return {}
+
+    @staticmethod
+    def _diagnoses_disagree(sol_1: dict[str, Any], sol_2: dict[str, Any]) -> bool:
+        """Token-level Jaccard similarity test on the diagnosis prose.
+
+        Used purely as an audit signal: when two diagnoses are sufficiently
+        different we post a `conflict` message to the bus so the trace shows
+        an explicit conflict-resolution event. The reconciler runs in either
+        case — agreement or disagreement — to produce the final fix plan.
+        """
+        d1 = (sol_1.get("diagnosis", "") or "").lower().strip()
+        d2 = (sol_2.get("diagnosis", "") or "").lower().strip()
+        if not d1 or not d2:
+            return False
+        t1, t2 = set(d1.split()), set(d2.split())
+        if not t1 or not t2:
+            return False
+        overlap = len(t1 & t2) / len(t1 | t2)
+        return overlap < 0.5
 
 
 # ---------------------------------------------------------------------------
