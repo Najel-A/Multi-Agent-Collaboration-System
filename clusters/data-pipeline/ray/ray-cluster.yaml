@@ -63,11 +63,11 @@ spec:
 
             resources:
               requests:
-                cpu: "2"
-                memory: "4Gi"
+                cpu: "500m"
+                memory: "1Gi"
               limits:
-                cpu: "2"
-                memory: "4Gi"
+                cpu: "1"
+                memory: "2Gi"
 
   workerGroupSpecs:
     - groupName: cpu-workers
@@ -109,8 +109,8 @@ spec:
 
               resources:
                 requests:
-                  cpu: "2"
-                  memory: "2Gi"
+                  cpu: "500m"
+                  memory: "1Gi"
                 limits:
-                  cpu: "3"
-                  memory: "3Gi"
+                  cpu: "1"
+                  memory: "2Gi"
