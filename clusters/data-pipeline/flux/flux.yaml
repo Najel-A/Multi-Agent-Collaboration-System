@@ -4,7 +4,7 @@ metadata:
   name: app-source
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 15m
   url: https://github.com/Najel-A/Multi-Agent-Collaboration-System/
   ref:
     branch: ak-dev-pipeline
@@ -15,7 +15,7 @@ metadata:
   name: production-sync
   namespace: flux-system
 spec:
-  interval: 5m
+  interval: 15m
   path: "./clusters/data-pipeline"
   prune: true
   wait: true
