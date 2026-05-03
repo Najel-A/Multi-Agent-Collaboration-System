@@ -24,7 +24,7 @@ spec:
 
   values:
     autoDiscovery:
-      clusterName: Mulit-Agent-Collab
+      clusterName: Mulit-Agent
 
     awsRegion: us-west-2
 
