@@ -1,0 +1,847 @@
+scenario_id,payload
+createcontainerconfigerror_missing_secret,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: team-a-dev
+workload: module-w-ncf1
+container: module-w-ncf1-c
+image: ghcr.io/acme/backend:1.20.20
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+module-w-ncf1-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           module-w-ncf1-pod
+Namespace:      team-a-dev
+Status:         Pending
+Containers:
+  module-w-ncf1-c:
+    Image:      ghcr.io/acme/backend:1.20.20
+    State:      Waiting
+      Reason:   CreateContainerConfigError
+      Message:  Error: secret ""api-secrets"" not found
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Failed	pod/module-w-ncf1-pod	Error: secret ""api-secrets"" not found
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Failed	pod/module-w-ncf1-pod	Error: secret ""api-secrets"" not found
+
+=== container logs ===
+Error: secret ""api-secrets"" not found
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+createcontainerconfigerror_bad_configmap_key,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: logging
+workload: component-w-rkkb
+container: component-w-rkkb-c
+image: docker.io/acme/worker:1.10
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+component-w-rkkb-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           component-w-rkkb-pod
+Namespace:      logging
+Status:         Pending
+Containers:
+  component-w-rkkb-c:
+    Image:      docker.io/acme/worker:1.10
+    State:      Waiting
+      Reason:   CreateContainerConfigError
+      Message:  Error: configmap ""cm-qi82t"" does not contain key ""MISSING_CONFIG_PATH""
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Failed	pod/component-w-rkkb-pod	Error: configmap ""cm-qi82t"" does not contain key ""MISSING_CONFIG_PATH""
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Failed	pod/component-w-rkkb-pod	Error: configmap ""cm-qi82t"" does not contain key ""MISSING_CONFIG_PATH""
+
+=== container logs ===
+Error: configmap ""cm-qi82t"" does not contain key ""MISSING_CONFIG_PATH""
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+crashloop_bad_args,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: backend
+workload: service-w-qnat
+container: app
+image: ghcr.io/acme/backend:5.13.25
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+service-w-qnat-pod	0/1	Running	5	unknown
+
+=== kubectl describe pod ===
+Name:           service-w-qnat-pod
+Namespace:      backend
+Status:         Running
+Containers:
+  app:
+    Image:      ghcr.io/acme/backend:5.13.25
+    State:      Waiting
+      Reason:   CrashLoopBackOff
+      Message:  Back-off restarting failed container
+    Ready:      False
+    Restart Count: 5
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	BackOff	pod/service-w-qnat-pod	Back-off restarting failed container
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	BackOff	pod/service-w-qnat-pod	Back-off restarting failed container
+
+=== container logs ===
+Back-off restarting failed container
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+imagepull_bad_tag,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: team-a-8
+workload: backend-w-8a2d
+container: backend-w-8a2d-svc
+image: docker.io/acme/worker:latest-typo
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+backend-w-8a2d-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           backend-w-8a2d-pod
+Namespace:      team-a-8
+Status:         Pending
+Containers:
+  backend-w-8a2d-svc:
+    Image:      docker.io/acme/worker:latest-typo
+    State:      Waiting
+      Reason:   ImagePullBackOff
+      Message:  Back-off pulling image
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Failed	pod/backend-w-8a2d-pod	Failed to pull image ""docker.io/acme/worker:latest-typo"": manifest unknown
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Failed	pod/backend-w-8a2d-pod	Failed to pull image ""docker.io/acme/worker:latest-typo"": manifest unknown
+
+=== container logs ===
+Back-off pulling image
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+imagepull_registry_auth,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: dev-prod
+workload: processor-w-2w7h
+container: app
+image: ghcr.io/acme/private-api:5.8.16
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+processor-w-2w7h-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           processor-w-2w7h-pod
+Namespace:      dev-prod
+Status:         Pending
+Containers:
+  app:
+    Image:      ghcr.io/acme/private-api:5.8.16
+    State:      Waiting
+      Reason:   ImagePullBackOff
+      Message:  unauthorized: authentication required
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Failed	pod/processor-w-2w7h-pod	Failed to pull image ""ghcr.io/acme/private-api:5.8.16"": unauthorized: authentication required
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Failed	pod/processor-w-2w7h-pod	Failed to pull image ""ghcr.io/acme/private-api:5.8.16"": unauthorized: authentication required
+
+=== container logs ===
+unauthorized: authentication required
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+failedscheduling_taint,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: team-a
+workload: app-w-2xo6
+container: app-w-2xo6-core
+image: ghcr.io/acme/app:5.20.24
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-2xo6-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           app-w-2xo6-pod
+Namespace:      team-a
+Status:         Pending
+Containers:
+  app-w-2xo6-core:
+    Image:      ghcr.io/acme/app:5.20.24
+    State:      Waiting
+      Reason:   Pending
+      Message:  FailedScheduling
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/app-w-2xo6-pod	0/9 nodes are available: 9 node(s) had untolerated taint {dedicated=gpu: NoSchedule}.
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/app-w-2xo6-pod	0/9 nodes are available: 9 node(s) had untolerated taint {dedicated=gpu: NoSchedule}.
+
+=== container logs ===
+FailedScheduling
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+failedscheduling_insufficient_memory,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: data
+workload: service-w-iw5v
+container: service-w-iw5v-core
+image: docker.io/acme/api:1.18.13
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+service-w-iw5v-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           service-w-iw5v-pod
+Namespace:      data
+Status:         Pending
+Containers:
+  service-w-iw5v-core:
+    Image:      docker.io/acme/api:1.18.13
+    State:      Waiting
+      Reason:   Pending
+      Message:  Insufficient memory
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/service-w-iw5v-pod	0/9 nodes are available: 9 Insufficient memory.
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/service-w-iw5v-pod	0/9 nodes are available: 9 Insufficient memory.
+
+=== container logs ===
+Insufficient memory
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+failedscheduling_insufficient_cpu,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: team-b
+workload: app-w-tmea
+container: server
+image: ghcr.io/acme/backend:4.7.8
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-tmea-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           app-w-tmea-pod
+Namespace:      team-b
+Status:         Pending
+Containers:
+  server:
+    Image:      ghcr.io/acme/backend:4.7.8
+    State:      Waiting
+      Reason:   Pending
+      Message:  Insufficient cpu
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/app-w-tmea-pod	0/9 nodes are available: 9 Insufficient cpu.
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/app-w-tmea-pod	0/9 nodes are available: 9 Insufficient cpu.
+
+=== container logs ===
+Insufficient cpu
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+nodeselector_mismatch,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: frontend
+workload: processor-w-n8xb
+container: processor-w-n8xb-svc
+image: quay.io/acme/backend:3.13.18
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+processor-w-n8xb-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           processor-w-n8xb-pod
+Namespace:      frontend
+Status:         Pending
+Containers:
+  processor-w-n8xb-svc:
+    Image:      quay.io/acme/backend:3.13.18
+    State:      Waiting
+      Reason:   Pending
+      Message:  nodeSelector mismatch
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/processor-w-n8xb-pod	0/5 nodes are available: 5 node(s) didn't match Pod's node affinity/selector.
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/processor-w-n8xb-pod	0/5 nodes are available: 5 node(s) didn't match Pod's node affinity/selector.
+
+=== container logs ===
+nodeSelector mismatch
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+pvc_pending_missing_storageclass,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: apps-prod
+workload: processor-w-jedc
+container: processor-w-jedc-core
+image: quay.io/acme/service:3.18.16
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+processor-w-jedc-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           processor-w-jedc-pod
+Namespace:      apps-prod
+Status:         Pending
+Containers:
+  processor-w-jedc-core:
+    Image:      quay.io/acme/service:3.18.16
+    State:      Waiting
+      Reason:   Pending
+      Message:  Unbound PVC
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/processor-w-jedc-pod	pod has unbound immediate PersistentVolumeClaims
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedScheduling	pod/processor-w-jedc-pod	pod has unbound immediate PersistentVolumeClaims
+
+=== container logs ===
+Unbound PVC
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+pvc_not_found_mountfail,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: prod
+workload: module-w-3dsf
+container: worker
+image: docker.io/acme/worker:0.17.4
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+module-w-3dsf-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           module-w-3dsf-pod
+Namespace:      prod
+Status:         Pending
+Containers:
+  worker:
+    Image:      docker.io/acme/worker:0.17.4
+    State:      Waiting
+      Reason:   Pending
+      Message:  PVC not found
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedMount	pod/module-w-3dsf-pod	MountVolume.SetUp failed for volume ""data"" : persistentvolumeclaim ""missing-pvc-2sbr"" not found
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedMount	pod/module-w-3dsf-pod	MountVolume.SetUp failed for volume ""data"" : persistentvolumeclaim ""missing-pvc-2sbr"" not found
+
+=== container logs ===
+PVC not found
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+oomkilled_limit_too_low,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: default
+workload: app-w-vqhl
+container: app-w-vqhl-c
+image: quay.io/acme/api:2.10.0
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-vqhl-pod	0/1	Running	7	unknown
+
+=== kubectl describe pod ===
+Name:           app-w-vqhl-pod
+Namespace:      default
+Status:         Running
+Containers:
+  app-w-vqhl-c:
+    Image:      quay.io/acme/api:2.10.0
+    State:      Waiting
+      Reason:   CrashLoopBackOff
+      Message:  OOMKilled
+    Ready:      False
+    Restart Count: 7
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Killing	pod/app-w-vqhl-pod	Container app-w-vqhl-c was OOMKilled (memory limit 256Mi)
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Killing	pod/app-w-vqhl-pod	Container app-w-vqhl-c was OOMKilled (memory limit 256Mi)
+
+=== container logs ===
+OOMKilled
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+readiness_probe_failure,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: sandbox
+workload: app-w-ka6x
+container: app
+image: ghcr.io/acme/app:1.5.6
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-ka6x-pod	0/1	Running	0	unknown
+
+=== kubectl describe pod ===
+Name:           app-w-ka6x-pod
+Namespace:      sandbox
+Status:         Running
+Containers:
+  app:
+    Image:      ghcr.io/acme/app:1.5.6
+    State:      Waiting
+      Reason:   Running
+      Message:  nan
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Unhealthy	pod/app-w-ka6x-pod	Readiness probe failed: HTTP probe failed with statuscode: 503
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Unhealthy	pod/app-w-ka6x-pod	Readiness probe failed: HTTP probe failed with statuscode: 503
+
+=== container logs ===
+nan
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+liveness_probe_failure,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: data-dev
+workload: app-w-u9yb
+container: app-w-u9yb-core
+image: ghcr.io/acme/backend:1.0.27
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-u9yb-pod	0/1	Running	9	unknown
+
+=== kubectl describe pod ===
+Name:           app-w-u9yb-pod
+Namespace:      data-dev
+Status:         Running
+Containers:
+  app-w-u9yb-core:
+    Image:      ghcr.io/acme/backend:1.0.27
+    State:      Waiting
+      Reason:   CrashLoopBackOff
+      Message:  Back-off restarting failed container
+    Ready:      False
+    Restart Count: 9
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Unhealthy	pod/app-w-u9yb-pod	Liveness probe failed: Get ""http://10.0.0.12:8080/healthz"": context deadline exceeded
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	Unhealthy	pod/app-w-u9yb-pod	Liveness probe failed: Get ""http://10.0.0.12:8080/healthz"": context deadline exceeded
+
+=== container logs ===
+Back-off restarting failed container
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+rbac_forbidden,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: team-b-dev
+workload: component-w-1wiq
+container: component-w-1wiq-svc
+image: quay.io/acme/service:3.19.13
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+component-w-1wiq-pod	0/1	Running	4	unknown
+
+=== kubectl describe pod ===
+Name:           component-w-1wiq-pod
+Namespace:      team-b-dev
+Status:         Running
+Containers:
+  component-w-1wiq-svc:
+    Image:      quay.io/acme/service:3.19.13
+    State:      Waiting
+      Reason:   CrashLoopBackOff
+      Message:  Back-off restarting failed container
+    Ready:      False
+    Restart Count: 4
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	BackOff	pod/component-w-1wiq-pod	Back-off restarting failed container
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	BackOff	pod/component-w-1wiq-pod	Back-off restarting failed container
+
+=== container logs ===
+Back-off restarting failed container
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+dns_resolution_failure,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: edge-t-46
+workload: backend-w-r48t
+container: backend-w-r48t-svc
+image: ghcr.io/acme/service:1.8.16
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+backend-w-r48t-pod	0/1	Running	1	unknown
+
+=== kubectl describe pod ===
+Name:           backend-w-r48t-pod
+Namespace:      edge-t-46
+Status:         Running
+Containers:
+  backend-w-r48t-svc:
+    Image:      ghcr.io/acme/service:1.8.16
+    State:      Waiting
+      Reason:   CrashLoopBackOff
+      Message:  Back-off restarting failed container
+    Ready:      False
+    Restart Count: 1
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	BackOff	pod/backend-w-r48t-pod	Back-off restarting failed container
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	BackOff	pod/backend-w-r48t-pod	Back-off restarting failed container
+
+=== container logs ===
+Back-off restarting failed container
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+service_connection_refused,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: observability
+workload: app-w-d4kf
+container: app-w-d4kf-c
+image: ghcr.io/acme/app:5.1.11
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-d4kf-pod	0/1	Running	4	unknown
+
+=== kubectl describe pod ===
+Name:           app-w-d4kf-pod
+Namespace:      observability
+Status:         Running
+Containers:
+  app-w-d4kf-c:
+    Image:      ghcr.io/acme/app:5.1.11
+    State:      Waiting
+      Reason:   CrashLoopBackOff
+      Message:  Back-off restarting failed container
+    Ready:      False
+    Restart Count: 4
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	BackOff	pod/app-w-d4kf-pod	Back-off restarting failed container
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	BackOff	pod/app-w-d4kf-pod	Back-off restarting failed container
+
+=== container logs ===
+Back-off restarting failed container
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
+quota_exceeded_pods,"<|im_start|>system
+You are a Kubernetes Site Reliability Engineering (SRE) agent. Given raw observability evidence from a Kubernetes incident, provide:
+1. A root cause diagnosis explaining what went wrong and why.
+2. A step-by-step fix plan to resolve the incident.
+3. Concrete actions or commands to apply the fix.
+4. Verification steps to confirm the fix worked.
+5. Rollback guidance if the fix causes issues.<|im_end|>
+<|im_start|>user
+Analyze this Kubernetes incident and provide diagnosis, remediation, verification, and rollback guidance.
+
+Incident Evidence:
+namespace: ml-t-us
+workload: app-w-9ilt
+container: app-w-9ilt-svc
+image: docker.io/acme/component:0.7.24
+=== kubectl get pods ===
+NAME	READY	STATUS	RESTARTS	AGE
+app-w-9ilt-pod	0/1	Pending	0	unknown
+
+=== kubectl describe pod ===
+Name:           app-w-9ilt-pod
+Namespace:      ml-t-us
+Status:         Pending
+Containers:
+  app-w-9ilt-svc:
+    Image:      docker.io/acme/component:0.7.24
+    State:      Waiting
+      Reason:   Pending
+      Message:  Quota exceeded
+    Ready:      False
+    Restart Count: 0
+
+Events:
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedCreate	pod/app-w-9ilt-pod	Error creating: pods ""app-w-9ilt-pod-6gp6"" is forbidden: exceeded quota: pods, requested: 1, used: 50, limited: 50
+
+=== kubectl get events ===
+LAST SEEN	TYPE	REASON	OBJECT	MESSAGE
+unknown	Warning	FailedCreate	pod/app-w-9ilt-pod	Error creating: pods ""app-w-9ilt-pod-6gp6"" is forbidden: exceeded quota: pods, requested: 1, used: 50, limited: 50
+
+=== container logs ===
+Quota exceeded
+
+=== metrics_snapshot ===
+metrics_snapshot: restarts=None, oom_killed=None<|im_end|>
+<|im_start|>assistant
+"
