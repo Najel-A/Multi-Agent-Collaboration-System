@@ -1,0 +1,128 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kube-prometheus-stack
+  namespace: monitoring
+spec:
+  interval: 10m
+  chart:
+    spec:
+      chart: kube-prometheus-stack
+      version: "84.5.0"
+      sourceRef:
+        kind: HelmRepository
+        name: prometheus-community
+        namespace: flux-system
+      interval: 10m
+
+  install:
+    createNamespace: true
+    crds: CreateReplace
+    remediation:
+      retries: 3
+
+  upgrade:
+    crds: CreateReplace
+    remediation:
+      retries: 3
+
+  values:
+    fullnameOverride: kps
+
+    crds:
+      enabled: true
+
+    prometheusOperator:
+      enabled: true
+
+    prometheus:
+      enabled: true
+      prometheusSpec:
+        replicas: 1
+        retention: 1d
+        scrapeInterval: 30s
+        evaluationInterval: 30s
+
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 20Gi
+
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2Gi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+
+    alertmanager:
+      enabled: true
+      alertmanagerSpec:
+        replicas: 1
+        storage:
+          volumeClaimTemplate:
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 5Gi
+
+    grafana:
+      enabled: true
+      adminUser: admin
+      adminPassword: prom-operator
+
+      service:
+        type: ClusterIP
+
+      persistence:
+        enabled: true
+        size: 10Gi
+
+      sidecar:
+        dashboards:
+          enabled: true
+        datasources:
+          enabled: true
+
+    kubeStateMetrics:
+      enabled: true
+
+    nodeExporter:
+      enabled: true
+
+    defaultRules:
+      create: true
+
+    kubeApiServer:
+      enabled: true
+
+    kubelet:
+      enabled: true
+
+    kubeControllerManager:
+      enabled: true
+
+    coreDns:
+      enabled: true
+
+    kubeEtcd:
+      enabled: true
+
+    kubeScheduler:
+      enabled: true
+
+    kubeProxy:
+      enabled: true
