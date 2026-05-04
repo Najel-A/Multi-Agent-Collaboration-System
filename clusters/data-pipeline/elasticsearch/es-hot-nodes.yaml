@@ -2,7 +2,7 @@ apiVersion: elasticsearch.k8s.elastic.co/v1
 kind: Elasticsearch
 metadata:
   name: mas-elasticsearch
-  namespace: elastic-system
+  namespace: elastic-search
 spec:
   version: 9.1.2
   nodeSets:
