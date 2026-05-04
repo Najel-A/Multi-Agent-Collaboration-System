@@ -4,3 +4,20 @@ clusters/elk-aws/.env
 clusters/elk-prod/.env
 clusters/monitoring-cluster-qa/.env
 testjobs
+
+# najel-data/training (generated outputs)
+najel-data/training/artifacts/
+najel-data/training/.ipynb_checkpoints/
+najel-data/training/**/.ipynb_checkpoints/
+
+
+# Jupyter and Python cache
+**/.ipynb_checkpoints/
+**/__pycache__/
+*.pyc
+
+# model training cache
+**/hf_cache/
+**/.cache/huggingface/
+**/wandb/
+**/mlruns/
