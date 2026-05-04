@@ -2,13 +2,14 @@ apiVersion: elasticsearch.k8s.elastic.co/v1
 kind: Elasticsearch
 metadata:
   name: mas-elasticsearch
-  namespace: elastic-search
+  namespace: elasticsearch
 spec:
   version: 9.1.2
   nodeSets:
-    - name: default
-      count: 0
+    - name: hot
+      count: 2
       config:
+        node.roles: ["master", "data_hot", "data_content", "ingest"]
         node.store.allow_mmap: false
       podTemplate:
         spec:
@@ -16,11 +17,11 @@ spec:
             - name: elasticsearch
               resources:
                 requests:
-                  cpu: "500m"
-                  memory: "2Gi"
-                limits:
                   cpu: "1"
                   memory: "2Gi"
+                limits:
+                  cpu: "2"
+                  memory: "4Gi"
       volumeClaimTemplates:
         - metadata:
             name: elasticsearch-data
@@ -29,5 +30,5 @@ spec:
               - ReadWriteOnce
             resources:
               requests:
-                storage: 10Gi
+                storage: 20Gi
             storageClassName: gp3
