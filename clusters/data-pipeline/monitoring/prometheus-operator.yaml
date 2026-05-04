@@ -37,6 +37,16 @@ spec:
 
     prometheus:
       enabled: true
+      service:
+        type: ClusterIP
+      ingress:
+        enabled: true
+        ingressClassName: nginx
+        hosts:
+          - prometheus.monitoring.com
+        paths:
+          - /
+        pathType: Prefix
       prometheusSpec:
         replicas: 1
         retention: 1d
@@ -67,6 +77,16 @@ spec:
 
     alertmanager:
       enabled: true
+      service:
+        type: ClusterIP
+      ingress:
+        enabled: true
+        ingressClassName: nginx
+        hosts:
+          - alertmanager.monitoring.com
+        paths:
+          - /
+        pathType: Prefix
       alertmanagerSpec:
         replicas: 1
         storage:
@@ -80,6 +100,16 @@ spec:
 
     grafana:
       enabled: true
+      service:
+        type: ClusterIP
+      ingress:
+        enabled: true
+        ingressClassName: nginx
+        hosts:
+          - grafana.monitoring.com
+        paths:
+          - /
+        pathType: Prefix
       adminUser: admin
       adminPassword: prom-operator
 
