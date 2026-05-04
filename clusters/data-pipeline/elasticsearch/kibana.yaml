@@ -4,7 +4,7 @@ metadata:
   name: mas-kibana
   namespace: elasticsearch
 spec:
-  version: 8.15.3
+  version: 9.1.2
   count: 1
   elasticsearchRef:
     name: mas-elasticsearch
