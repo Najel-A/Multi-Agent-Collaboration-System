@@ -17,7 +17,6 @@ spec:
       interval: 10m
 
   install:
-    createNamespace: true
     crds: CreateReplace
     remediation:
       retries: 3
@@ -102,6 +101,15 @@ spec:
 
     nodeExporter:
       enabled: true
+      priorityClassName: system-node-critical
+
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
 
     defaultRules:
       create: true
