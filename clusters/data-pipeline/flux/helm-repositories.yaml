@@ -15,3 +15,12 @@ metadata:
 spec:
   interval: 30m
   url: https://ray-project.github.io/kuberay-helm/
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: autoscaler
+  namespace: flux-system
+spec:
+  interval: 30m
+  url: https://kubernetes.github.io/autoscaler

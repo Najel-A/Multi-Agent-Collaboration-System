@@ -1,0 +1,41 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cluster-autoscaler
+  namespace: kube-system
+spec:
+  interval: 15m
+  chart:
+    spec:
+      chart: cluster-autoscaler
+      sourceRef:
+        kind: HelmRepository
+        name: autoscaler
+        namespace: flux-system
+      interval: 30m
+
+  install:
+    remediation:
+      retries: 3
+
+  upgrade:
+    remediation:
+      retries: 3
+
+  values:
+    autoDiscovery:
+      clusterName: Multi-Agent
+
+    awsRegion: us-west-2
+
+    cloudProvider: aws
+
+    rbac:
+      serviceAccount:
+        create: false
+        name: cluster-autoscaler
+
+    extraArgs:
+      balance-similar-node-groups: "true"
+      skip-nodes-with-system-pods: "false"
+      expander: least-waste
