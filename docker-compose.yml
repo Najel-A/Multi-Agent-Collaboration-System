@@ -1,0 +1,45 @@
+# Compose file for the four NexusTrace inference model services.
+#
+# All four images are amd64-only at time of writing. On Apple Silicon Macs,
+# Docker Desktop emulates via QEMU/Rosetta — slow but functional.
+#
+# Internal port (container side) is ASSUMED to be 8000. After pulling the
+# images, verify with:
+#     docker inspect <image> | python3 -c \
+#       "import sys,json; print(json.load(sys.stdin)[0]['Config'].get('ExposedPorts'))"
+# If the actual port is different, change the right side of the ports mapping.
+#
+# To bring everything up:
+#     docker compose up -d
+#
+# To bring it down:
+#     docker compose down
+
+services:
+  rca-qwen:
+    image: deveshs18/rca-lora-qwen:latest
+    platform: linux/amd64
+    ports:
+      - "11001:8000"
+    restart: unless-stopped
+
+  rca-deepseek:
+    image: deveshs18/rca-lora-deepseek:latest
+    platform: linux/amd64
+    ports:
+      - "11002:8000"
+    restart: unless-stopped
+
+  executor:
+    image: mrunalikatta/executor-mistral-24b:latest
+    platform: linux/amd64
+    ports:
+      - "11003:8000"
+    restart: unless-stopped
+
+  validator:
+    image: mrunalikatta/validator-llama-3b:latest
+    platform: linux/amd64
+    ports:
+      - "11004:8000"
+    restart: unless-stopped

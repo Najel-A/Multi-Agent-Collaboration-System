@@ -20,20 +20,22 @@ Pipeline (matches the architecture diagram):
             ▼
     AnalyzeResponse           ← assembled from the four typed outputs
 
-Per-step `asyncio.wait_for` caps each phase so a hung stub (or, later, a
-hung model call) can't pin a request indefinitely. The cap is generous
-for the stub demo — tighten it once real model calls are wired.
+Per-step `asyncio.wait_for` caps each phase so a hung stub (or model call)
+can't pin a request indefinitely. The cap reads from `MODEL_TIMEOUT_S`
+(default 180s) — high enough for x86-emulated real models on Apple
+Silicon, plenty for stubs.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 
 from agents import agent1, agent2, reconciler, validator
 from schemas.responses import AnalyzeResponse, FinalRecommendation
 from services.memory import IncidentBlackboard
 
-_STEP_TIMEOUT_S = 30.0
+_STEP_TIMEOUT_S = float(os.environ.get("MODEL_TIMEOUT_S", "180"))
 
 
 async def run_pipeline(

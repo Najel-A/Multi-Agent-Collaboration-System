@@ -26,6 +26,10 @@ uvicorn app:app --host 0.0.0.0 --port 8001 --reload
 Port **8001** is intentional — the existing `api/main.py` inference service
 already binds port 8000.
 
+> **Setting up on a fresh machine?** See [`RUNNING.md`](RUNNING.md) for a
+> step-by-step portable guide covering macOS, Linux, and Windows including
+> virtualenv setup and per-OS troubleshooting.
+
 ## Endpoints
 
 - `GET  /health` — liveness + agent roster
@@ -88,10 +92,11 @@ fastapi/
     agent1.py  agent2.py  reconciler.py  validator.py
   schemas/               Pydantic request/response models
     requests.py  responses.py
-  services/              orchestrator + in-memory blackboard
-    orchestrator.py  memory.py
+  services/              orchestrator + in-memory blackboard + model client
+    orchestrator.py  memory.py  model_client.py
   tests/                 pytest sanity tests
     test_sanity.py
+  .env.example           sample env config for real-model wiring
   payload.json           default sample (PVC scenario)
   payloads/              five themed test scenarios
     01_storage_pvc_not_found.json
