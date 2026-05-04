@@ -4,7 +4,7 @@ metadata:
   name: alert-topic
   namespace: kafka
   labels:
-    strimzi.io/cluster: MAS-kafka
+    strimzi.io/cluster: mas-kafka
 spec:
   partitions: 3
   replicas: 2

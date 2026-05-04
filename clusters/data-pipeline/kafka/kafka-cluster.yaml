@@ -4,7 +4,7 @@ metadata:
   name: controller
   namespace: kafka
   labels:
-    strimzi.io/cluster: MAS-kafka
+    strimzi.io/cluster: mas-kafka
 spec:
   replicas: 1
   roles:
@@ -25,7 +25,7 @@ metadata:
   name: broker
   namespace: kafka
   labels:
-    strimzi.io/cluster: MAS-kafka
+    strimzi.io/cluster: mas-kafka
 spec:
   replicas: 2
   roles:
@@ -43,7 +43,7 @@ spec:
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
-  name: MAS-kafka
+  name: mas-kafka
   namespace: kafka
   annotations:
     strimzi.io/node-pools: enabled
