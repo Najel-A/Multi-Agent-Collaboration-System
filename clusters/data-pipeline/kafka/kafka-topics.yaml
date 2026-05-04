@@ -8,6 +8,7 @@ metadata:
 spec:
   partitions: 3
   replicas: 2
+  topicName: alert-topic
   config:
     retention.ms: 604800000
     segment.bytes: 1073741824

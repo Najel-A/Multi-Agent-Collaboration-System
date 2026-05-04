@@ -15,5 +15,7 @@ spec:
         namespace: flux-system
   install:
     createNamespace: false
+  upgrade:
+    crds: CreateReplace
   values:
     watchAnyNamespace: true
