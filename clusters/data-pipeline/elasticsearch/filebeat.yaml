@@ -14,13 +14,14 @@ spec:
         name: elastic
         namespace: flux-system
   values:
-    secretMounts: []
-    extraVolumes: []
-    extraVolumeMounts: []
+    
     image: docker.elastic.co/beats/filebeat
     imageTag: "9.1.2"
 
     daemonset:
+      secretMounts: []
+      extraVolumes: []
+      extraVolumeMounts: []
       enabled: true
       filebeatConfig:
         filebeat.yml: |
