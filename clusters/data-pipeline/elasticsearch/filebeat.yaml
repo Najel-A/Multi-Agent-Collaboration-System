@@ -16,7 +16,7 @@ spec:
   values:
     image: docker.elastic.co/beats/filebeat
     imageTag: "9.1.2"
-    
+
     daemonset:
       enabled: true
 

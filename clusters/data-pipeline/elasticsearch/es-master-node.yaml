@@ -6,10 +6,10 @@ metadata:
 spec:
   version: 9.1.2
   nodeSets:
-    - name: hot
-      count: 2
+    - name: master
+      count: 1
       config:
-        node.roles: ["data_hot", "data_content", "ingest"]
+        node.roles: ["master"]
         node.store.allow_mmap: false
       podTemplate:
         spec:
@@ -20,7 +20,7 @@ spec:
                   cpu: "500m"
                   memory: "1Gi"
                 limits:
-                  cpu: "2"
+                  cpu: "1"
                   memory: "2Gi"
       volumeClaimTemplates:
         - metadata:
@@ -30,5 +30,5 @@ spec:
               - ReadWriteOnce
             resources:
               requests:
-                storage: 20Gi
+                storage: 10Gi
             storageClassName: gp3
