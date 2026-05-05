@@ -1,39 +1,9 @@
-apiVersion: helm.toolkit.fluxcd.io/v2
-kind: HelmRelease
-metadata:
-  name: filebeat
-  namespace: elasticsearch
-spec:
-  interval: 5m
-  chart:
-    spec:
-      chart: filebeat
-      version: "8.5.1"
-      sourceRef:
-        kind: HelmRepository
-        name: elastic
-        namespace: flux-system
-  values:
-    image: docker.elastic.co/beats/filebeat
-    imageTag: "9.1.2"
+values:
+  image: docker.elastic.co/beats/filebeat
+  imageTag: "9.1.2"
 
-    daemonset:
-      enabled: true
-
-    deployment:
-      enabled: false
-
-    serviceAccount: filebeat
-    secretMounts: []
-
-    clusterRoleRules:
-      - apiGroups: [""]
-        resources:
-          - pods
-          - namespaces
-          - nodes
-        verbs: ["get", "watch", "list"]
-
+  daemonset:
+    enabled: true
     filebeatConfig:
       filebeat.yml: |
         filebeat.autodiscover:
@@ -63,15 +33,26 @@ spec:
 
         logging.level: info
 
-    resources:
-      requests:
-        cpu: 25m
-        memory: 64Mi
-      limits:
-        cpu: 100m
-        memory: 128Mi
+  deployment:
+    enabled: false
 
-    tolerations:
-      - operator: Exists
+  serviceAccount: filebeat
+  secretMounts: []
 
-    hostPathRoot: /var/lib
+  clusterRoleRules:
+    - apiGroups: [""]
+      resources: ["pods", "namespaces", "nodes"]
+      verbs: ["get", "watch", "list"]
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+  tolerations:
+    - operator: Exists
+
+  hostPathRoot: /var/lib
