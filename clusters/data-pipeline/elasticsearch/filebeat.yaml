@@ -1,0 +1,78 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: filebeat
+  namespace: elasticsearch
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: filebeat
+      version: "8.5.1"
+      sourceRef:
+        kind: HelmRepository
+        name: elastic
+        namespace: flux-system
+  values:
+    image: docker.elastic.co/beats/filebeat
+    imageTag: "9.1.2"
+    
+    daemonset:
+      enabled: true
+
+    deployment:
+      enabled: false
+
+    serviceAccount:
+      create: true
+      name: filebeat
+
+    clusterRoleRules:
+      - apiGroups: [""]
+        resources:
+          - pods
+          - namespaces
+          - nodes
+        verbs: ["get", "watch", "list"]
+
+    filebeatConfig:
+      filebeat.yml: |
+        filebeat.autodiscover:
+          providers:
+            - type: kubernetes
+              scope: node
+              node: ${NODE_NAME}
+              hints.enabled: false
+              templates:
+                - condition:
+                    equals:
+                      kubernetes.namespace: "test-app"
+                  config:
+                    - type: container
+                      paths:
+                        - /var/log/containers/*-${data.kubernetes.container.id}.log
+
+        processors:
+          - add_kubernetes_metadata:
+              host: ${NODE_NAME}
+              matchers:
+                - logs_path:
+                    logs_path: "/var/log/containers/"
+
+        output.logstash:
+          hosts: ["logstash.elasticsearch.svc.cluster.local:5044"]
+
+        logging.level: info
+
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+
+    tolerations:
+      - operator: Exists
+
+    hostPathRoot: /var/lib
