@@ -19,7 +19,7 @@ spec:
     imageTag: "9.1.2"
 
     daemonset:
-      secretMounts: []
+      secretMounts:
       extraVolumes: []
       extraVolumeMounts: []
       enabled: true
