@@ -23,9 +23,7 @@ spec:
     deployment:
       enabled: false
 
-    serviceAccount:
-      create: true
-      name: filebeat
+    serviceAccount: filebeat
 
     clusterRoleRules:
       - apiGroups: [""]
