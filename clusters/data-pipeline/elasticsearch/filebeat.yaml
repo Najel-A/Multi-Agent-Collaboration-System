@@ -14,6 +14,9 @@ spec:
         name: elastic
         namespace: flux-system
   values:
+    secretMounts: []
+    extraVolumes: []
+    extraVolumeMounts: []
     image: docker.elastic.co/beats/filebeat
     imageTag: "9.1.2"
 
@@ -52,8 +55,6 @@ spec:
       enabled: false
 
     serviceAccount: filebeat
-    secretMounts: []
-
     clusterRoleRules:
       - apiGroups: [""]
         resources: ["pods", "namespaces", "nodes"]
