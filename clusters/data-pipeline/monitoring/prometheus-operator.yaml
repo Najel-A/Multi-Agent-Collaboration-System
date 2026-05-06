@@ -105,19 +105,7 @@ spec:
           - monitoring
 
     grafana:
-      enabled: true
-      service:
-        type: ClusterIP
-      ingress:
-        enabled: true
-        ingressClassName: nginx
-        hosts:
-          - grafana.monitoring.com
-        paths:
-          - /
-        pathType: Prefix
-      adminUser: admin
-      adminPassword: prom-operator
+      enabled: false
 
       persistence:
         enabled: true
