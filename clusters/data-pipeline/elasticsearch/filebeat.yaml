@@ -36,10 +36,13 @@ spec:
                       equals:
                         kubernetes.namespace: "test-app"
                     config:
-                      - type: container
-                        paths:
-                          - /var/log/containers/*-${data.kubernetes.container.id}.log
-
+                    - type: filestream
+                      id: container-${data.kubernetes.container.id}
+                      prospector.scanner.symlinks: true
+                      parsers:
+                        - container: ~
+                      paths:
+                        - /var/log/containers/*-${data.kubernetes.container.id}.log
           processors:
             - add_kubernetes_metadata:
                 host: ${NODE_NAME}
