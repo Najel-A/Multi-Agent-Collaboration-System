@@ -48,7 +48,7 @@ spec:
                       logs_path: "/var/log/containers/"
 
           output.logstash:
-            hosts: ["logstash.elasticsearch.svc.cluster.local:5044"]
+            hosts: ["logstash-logstash.elasticsearch.svc.cluster.local:5044"]
 
           logging.level: info
 
