@@ -3,6 +3,8 @@ kind: ConfigMap
 metadata:
   name: prometheus-config
   namespace: test-app
+  annotations:
+    kustomize.toolkit.fluxcd.io/reconcile: disabled
 data:
   wrong-key.yml: |
     global:
@@ -13,6 +15,8 @@ kind: Deployment
 metadata:
   name: broken-prometheus
   namespace: test-app
+  annotations:
+    kustomize.toolkit.fluxcd.io/reconcile: disabled
 spec:
   replicas: 1
   selector:
