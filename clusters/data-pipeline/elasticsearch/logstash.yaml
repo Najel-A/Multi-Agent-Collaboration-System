@@ -30,7 +30,7 @@ spec:
 
         output {
           elasticsearch {
-            hosts => ["https://mas-elasticsearch-es-internal-http.elasticsearch.svc.cluster.local:9200"]
+            hosts => ["https://mas-elasticsearch-es-internal-http.elasticsearch.svc:9200"]
             user => "elastic"
             password => "${ELASTIC_PASSWORD}"
             ssl_enabled => true
