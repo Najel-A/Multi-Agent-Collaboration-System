@@ -1,0 +1,7 @@
+accelerate==0.34.2
+bitsandbytes==0.44.1
+fastapi>=0.115.0
+peft==0.18.1
+pydantic>=2.0.0
+transformers==4.46.3
+uvicorn[standard]>=0.30.0

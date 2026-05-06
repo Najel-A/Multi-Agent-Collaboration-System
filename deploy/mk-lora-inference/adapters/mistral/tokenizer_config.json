@@ -1,0 +1,15 @@
+{
+  "add_prefix_space": null,
+  "backend": "tokenizers",
+  "bos_token": "<s>",
+  "clean_up_tokenization_spaces": false,
+  "eos_token": "</s>",
+  "fix_mistral_regex": true,
+  "is_local": false,
+  "legacy": true,
+  "model_max_length": 32768,
+  "pad_token": "</s>",
+  "tokenizer_class": "TokenizersBackend",
+  "unk_token": "<unk>",
+  "use_default_system_prompt": false
+}

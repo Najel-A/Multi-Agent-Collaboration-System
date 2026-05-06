@@ -6,3 +6,6 @@ mistral7b_qlora_out
 
 # HF Trainer checkpoint optimizers — exceed GitHub 100MB per-file limit
 **/optimizer.pt
+
+# LoRA adapter weights — too large for GitHub (baked into Docker images instead)
+**/adapter_model.safetensors
