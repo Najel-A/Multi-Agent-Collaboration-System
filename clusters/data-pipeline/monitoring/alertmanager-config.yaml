@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
   name: test-app-ns
-  namespace: monitoring
+  namespace: test-app
   labels:
     alertmanagerConfig: "true"
 spec:
@@ -12,11 +12,6 @@ spec:
       - name: namespace
         value: test-app
         matchType: =
-    groupBy:
-      - namespace
-    groupWait: 30s
-    groupInterval: 5m
-    repeatInterval: 12h
   receivers:
     - name: kafka-webhook
       webhookConfigs:
