@@ -97,6 +97,12 @@ spec:
               resources:
                 requests:
                   storage: 5Gi
+        alertmanagerConfigSelector:
+          matchLabels:
+            alertmanagerConfig: "true"
+        alertmanagerConfigNamespaceSelector:
+          matchNames:
+          - monitoring
 
     grafana:
       enabled: true

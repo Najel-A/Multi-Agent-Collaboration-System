@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: test-app-ns
+  namespace: monitoring
+  labels:
+    alertmanagerConfig: "true"
+spec:
+  route:
+    receiver: kafka-webhook
+    matchers:
+      - name: namespace
+        value: test-app
+        matchType: =
+  receivers:
+    - name: kafka-webhook
+      webhookConfigs:
+        - url: http://nexus-trace-alert-webhook.nexus-trace.svc.cluster.local:8080/alert
+          sendResolved: true
