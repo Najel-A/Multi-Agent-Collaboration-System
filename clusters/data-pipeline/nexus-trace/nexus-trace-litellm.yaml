@@ -44,11 +44,10 @@ spec:
 
     proxy_config:
       model_list:
-        - model_name: ollama-2b
-          litellm_params:
-            model: ollama_chat/llama3.2:1b
-            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
-            api_key: "dummy-key"
+      - model_name: ollama-2b
+        litellm_params:
+          model: ollama/llama3.2:3b
+          api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
 
     general_settings:
       master_key: os.environ/PROXY_MASTER_KEY
