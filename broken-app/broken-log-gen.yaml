@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken-log-generator
+  namespace: test-app
+  labels:
+    app: broken-log-generator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broken-log-generator
+  template:
+    metadata:
+      labels:
+        app: broken-log-generator
+    spec:
+      containers:
+        - name: broken-log-generator
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              i=0
+              while [ $i -lt 20 ]; do
+                echo "{\"level\":\"info\",\"service\":\"payment-api\",\"msg\":\"processing request\",\"request_id\":\"req-$i\"}"
+                echo "{\"level\":\"error\",\"service\":\"payment-api\",\"msg\":\"failed to connect to database\",\"error\":\"connection refused\",\"db_host\":\"postgres.test-app.svc.cluster.local\",\"retry\":$i}"
+                i=$((i+1))
+                sleep 1
+              done
+              echo "{\"level\":\"fatal\",\"service\":\"payment-api\",\"msg\":\"startup failed after retries\",\"reason\":\"database unavailable\"}"
+              exit 1

@@ -1,0 +1,38 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: mongo
+  namespace: nexus-trace
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: mongodb
+      version: "16.5.45"
+      sourceRef:
+        kind: HelmRepository
+        name: bitnami
+        namespace: flux-system
+  values:
+    fullnameOverride: mongo
+
+    architecture: standalone
+
+    auth:
+      enabled: false
+
+    persistence:
+      enabled: true
+      size: 5Gi
+
+    service:
+      ports:
+        mongodb: 27017
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
