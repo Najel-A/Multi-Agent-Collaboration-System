@@ -5,14 +5,17 @@ metadata:
   namespace: nexus-trace
 spec:
   interval: 5m
-
   chartRef:
     kind: OCIRepository
     name: bitnami-mongodb
     namespace: flux-system
-
   values:
     fullnameOverride: mongo
+
+    image:
+      registry: registry-1.docker.io
+      repository: bitnami/mongodb
+      tag: latest
 
     architecture: standalone
 
