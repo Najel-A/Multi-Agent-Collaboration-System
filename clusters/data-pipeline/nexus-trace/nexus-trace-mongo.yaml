@@ -5,14 +5,12 @@ metadata:
   namespace: nexus-trace
 spec:
   interval: 5m
-  chart:
-    spec:
-      chart: mongodb
-      version: "16.5.45"
-      sourceRef:
-        kind: HelmRepository
-        name: bitnami
-        namespace: flux-system
+
+  chartRef:
+    kind: OCIRepository
+    name: bitnami-mongodb
+    namespace: flux-system
+
   values:
     fullnameOverride: mongo
 
