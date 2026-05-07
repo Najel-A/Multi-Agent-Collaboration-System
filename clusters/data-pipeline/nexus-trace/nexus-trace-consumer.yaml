@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: nexus-trace-consumer
-          image: akasht29/kafka-mongo-consumer:1.0.0
+          image: akasht29/kafka-mongo-consumer:1.0.1
           imagePullPolicy: Always
           env:
             - name: KAFKA_BROKERS
