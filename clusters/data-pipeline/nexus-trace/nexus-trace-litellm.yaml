@@ -44,14 +44,14 @@ spec:
 
     proxy_config:
       model_list:
-        - model_name: qwen-rca
+        - model_name: ollama-2b
           litellm_params:
-            model: openai/qwen-rca
+            model: ollama_chat/llama3.2:1b
             api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
             api_key: "dummy-key"
 
-      general_settings:
-        master_key: os.environ/PROXY_MASTER_KEY
+    general_settings:
+      master_key: os.environ/PROXY_MASTER_KEY
 
     resources:
       requests:
