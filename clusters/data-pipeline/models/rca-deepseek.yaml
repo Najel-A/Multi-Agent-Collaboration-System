@@ -26,7 +26,7 @@ spec:
       volumes:
         - name: hf-cache
           emptyDir:
-            sizeLimit: 30Gi
+            sizeLimit: 60Gi
       containers:
         - name: rca-deepseek
           image: deveshs18/rca-lora-deepseek:latest
@@ -44,12 +44,12 @@ spec:
             requests:
               cpu: "1"
               memory: "6Gi"
-              ephemeral-storage: "15Gi"
+              ephemeral-storage: "40Gi"
               nvidia.com/gpu: "1"
             limits:
               cpu: "2"
               memory: "10Gi"
-              ephemeral-storage: "25Gi"
+              ephemeral-storage: "60Gi"
               nvidia.com/gpu: "1"
           readinessProbe:
             httpGet:
