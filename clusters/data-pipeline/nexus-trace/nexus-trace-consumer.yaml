@@ -23,7 +23,7 @@ spec:
             - name: KAFKA_TOPIC
               value: "alert-topic"
             - name: KAFKA_GROUP_ID
-              value: "mongo-writer-group"
+              value: "mongo-writer-debug-1"
             - name: MONGO_URI
               value: "mongodb://mongo.nexus-trace.svc.cluster.local:27017/lsa-webapp"
             - name: MONGO_DB
