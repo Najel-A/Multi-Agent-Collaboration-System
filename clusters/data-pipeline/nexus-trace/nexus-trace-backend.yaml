@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-trace-backend
+  namespace: nexus-trace
+  labels:
+    app.kubernetes.io/name: nexus-trace-backend
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexus-trace-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexus-trace-backend
+        app.kubernetes.io/component: api
+    spec:
+      containers:
+        - name: backend
+          image: frostal027/lsa-backend:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: MONGODB_URI
+              value: "mongodb://mongo:27017/nexus-trace"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: nexus-trace-app-secrets
+                  key: jwt-secret
+            - name: CORS_ORIGIN
+              valueFrom:
+                secretKeyRef:
+                  name: nexus-trace-app-secrets
+                  key: cors-origin
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: nexus-trace
+  labels:
+    app.kubernetes.io/name: nexus-trace-backend
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nexus-trace-backend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
