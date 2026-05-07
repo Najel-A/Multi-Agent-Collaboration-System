@@ -47,7 +47,7 @@ spec:
         - model_name: qwen-rca
           litellm_params:
             model: openai/qwen-rca
-            api_base: http://vllm-k8s-rca.default.svc.cluster.local:8000/v1
+            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
             api_key: "dummy-key"
 
       general_settings:
