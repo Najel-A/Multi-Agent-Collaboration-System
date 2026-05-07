@@ -105,7 +105,7 @@ spec:
           - monitoring
 
     grafana:
-      enabled: false
+      enabled: true
 
       persistence:
         enabled: true
