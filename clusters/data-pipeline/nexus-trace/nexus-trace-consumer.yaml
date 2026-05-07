@@ -25,7 +25,7 @@ spec:
             - name: KAFKA_GROUP_ID
               value: "mongo-writer-group"
             - name: MONGO_URI
-              value: "mongodb://mongo:27017/lsa-webapp"
+              value: "mongodb://mongo.nexus-trace.svc.cluster.local:27017/lsa-webapp"
             - name: MONGO_DB
               value: "lsa-webapp"
             - name: MONGO_COLLECTION
