@@ -31,15 +31,15 @@ spec:
             - name: RCA_QWEN_URL
               value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: RCA_QWEN_MODEL
-              value: "qwen"
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: RCA_DEEPSEEK_URL
               value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: RCA_DEEPSEEK_MODEL
-              value: "gemma:2b"
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: EXECUTOR_URL
               value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: EXECUTOR_MODEL
-              value: "gemma:2b"
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: VALIDATOR_URL
               value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: VALIDATOR_MODEL
