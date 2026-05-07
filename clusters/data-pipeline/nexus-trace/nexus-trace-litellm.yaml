@@ -44,7 +44,7 @@ spec:
 
     proxy_config:
       model_list:
-      - model_name: ollama-2b
+      - model_name: llama3.2:3b
         litellm_params:
           model: ollama/llama3.2:3b
           api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
