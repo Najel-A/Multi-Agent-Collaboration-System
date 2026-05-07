@@ -29,19 +29,19 @@ spec:
               value: "180"
             # Sanity-check mode: route ALL 4 agents through a single small Ollama model.
             - name: RCA_QWEN_URL
-              value: "http://ollama-2b:11434/api/chat"
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: RCA_QWEN_MODEL
               value: "llama3.2:3b"
             - name: RCA_DEEPSEEK_URL
-              value: "http://ollama-2b:11434/api/chat"
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: RCA_DEEPSEEK_MODEL
               value: "llama3.2:3b"
             - name: EXECUTOR_URL
-              value: "http://ollama-2b:11434/api/chat"
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: EXECUTOR_MODEL
               value: "llama3.2:3b"
             - name: VALIDATOR_URL
-              value: "http://ollama-2b:11434/api/chat"
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
             - name: VALIDATOR_MODEL
               value: "llama3.2:3b"
           readinessProbe:
