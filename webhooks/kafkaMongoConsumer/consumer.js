@@ -21,6 +21,14 @@ const consumer = kafka.consumer({
 const mongoClient = new MongoClient(mongoUri);
 
 async function main() {
+  console.log("Starting Kafka to Mongo consumer");
+  console.log(`Kafka brokers: ${kafkaBrokers.join(",")}`);
+  console.log(`Kafka topic: ${kafkaTopic}`);
+  console.log(`Kafka groupId: ${kafkaGroupId}`);
+  console.log(`Mongo URI: ${mongoUri}`);
+  console.log(`Mongo DB: ${mongoDb}`);
+  console.log(`Mongo collection: ${mongoCollection}`);
+
   await mongoClient.connect();
   console.log("Connected to MongoDB");
 
@@ -32,13 +40,18 @@ async function main() {
 
   await consumer.subscribe({
     topic: kafkaTopic,
-    fromBeginning: false,
+    fromBeginning: true,
   });
 
   await consumer.run({
     eachMessage: async ({ topic, partition, message }) => {
       try {
         const raw = message.value.toString();
+
+        console.log(
+          `Received message topic=${topic} partition=${partition} offset=${message.offset}`
+        );
+
         const doc = JSON.parse(raw);
 
         await collection.insertOne({
@@ -52,9 +65,12 @@ async function main() {
           ingested_at: new Date(),
         });
 
-        console.log(`Inserted Kafka offset ${message.offset}`);
+        console.log(
+          `Inserted Kafka message topic=${topic} partition=${partition} offset=${message.offset}`
+        );
       } catch (err) {
-        console.error("Failed to insert message:", err.message);
+        console.error("Failed to process message");
+        console.error(err);
       }
     },
   });
