@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen-vllm
+  namespace: nexus-trace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: qwen-vllm
+  template:
+    metadata:
+      labels:
+        app: qwen-vllm
+    spec:
+      nodeSelector:
+        gpu-node-large: "true"
+
+      tolerations:
+        - key: "gpu-node-large"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+      volumes:
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 80Gi
+
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          imagePullPolicy: Always
+
+          command:
+            - python3
+            - -m
+            - vllm.entrypoints.openai.api_server
+
+          args:
+            - --model
+            - Qwen/Qwen2.5-7B-Instruct
+
+            - --served-model-name
+            - qwen-tool
+
+            - --host
+            - 0.0.0.0
+
+            - --port
+            - "8000"
+
+            - --dtype
+            - half
+
+            - --gpu-memory-utilization
+            - "0.90"
+
+            - --max-model-len
+            - "4096"
+
+            - --enable-auto-tool-choice
+
+            - --tool-call-parser
+            - hermes
+
+          env:
+            - name: HF_HOME
+              value: /hf-cache
+
+            - name: TRANSFORMERS_CACHE
+              value: /hf-cache
+
+          ports:
+            - name: http
+              containerPort: 8000
+
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /hf-cache
+
+          resources:
+            requests:
+              cpu: "2"
+              memory: "10Gi"
+              ephemeral-storage: "20Gi"
+              nvidia.com/gpu: "1"
+
+            limits:
+              cpu: "4"
+              memory: "20Gi"
+              ephemeral-storage: "60Gi"
+              nvidia.com/gpu: "1"
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 180
+            periodSeconds: 15
+            failureThreshold: 40
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 300
+            periodSeconds: 30
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen-vllm
+  namespace: nexus-trace
+spec:
+  selector:
+    app: qwen-vllm
+
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+
+  type: ClusterIP

@@ -62,12 +62,11 @@ spec:
             api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434/v1
             num_ctx: 8192
             api_key: "dummy"
-        - model_name: qwen2.5:7b-instruct
+        - model_name: qwen-tool
           litellm_params:
-            model: openai/qwen2.5:7b-instruct
-            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434/v1
-            num_ctx: 8192
-            api_key: "dummy"
+            model: openai/qwen-tool
+            api_base: http://qwen-vllm.nexus-trace.svc.cluster.local:8000/v1
+            api_key: dummy
 
       mcp_servers:
         k8s_mcp_readonly:
