@@ -16,7 +16,7 @@ spec:
 
   values:
     grafana:
-      url: http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local
+      url: http://kps-grafana.monitoring.svc.cluster.local
       apiKey:
         existingSecret: grafana-mcp-secret
         existingSecretKey: api-key
@@ -26,3 +26,4 @@ spec:
     service:
       type: ClusterIP
       port: 8080
+      targetPort: 8000
