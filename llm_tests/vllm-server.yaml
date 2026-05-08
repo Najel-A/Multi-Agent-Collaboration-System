@@ -14,7 +14,7 @@ spec:
         app: qwen-vllm
     spec:
       nodeSelector:
-        gpu-node-large: "true"
+        gpu-node: "true"
 
       tolerations:
         - key: "gpu-node"
