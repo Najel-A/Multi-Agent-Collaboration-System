@@ -14,9 +14,9 @@ spec:
         app: rca-mistral
     spec:
       nodeSelector:
-        gpu-node: "true"
+        gpu-node-large: "true"
       tolerations:
-        - key: "gpu-node"
+        - key: "gpu-node-large"
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
@@ -46,14 +46,14 @@ spec:
               mountPath: /hf-cache
           resources:
             requests:
-              cpu: "2"
-              memory: "8"
-              ephemeral-storage: "55Gi"
+              cpu: "1"
+              memory: "8Gi"
+              ephemeral-storage: "20Gi"
               nvidia.com/gpu: "1"
             limits:
               cpu: "4"
-              memory: "10Gi"
-              ephemeral-storage: "70Gi"
+              memory: "14Gi"
+              ephemeral-storage: "60Gi"
               nvidia.com/gpu: "1"
           readinessProbe:
             httpGet:
