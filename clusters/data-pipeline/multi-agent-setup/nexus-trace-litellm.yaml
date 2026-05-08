@@ -46,7 +46,7 @@ spec:
       model_list:
         - model_name: llama3.2:3b
           litellm_params:
-            model: ollama/llama3.2:3b
+            model: openai/llama3.2:3b
             api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
 
         - model_name: rca-deepseek
@@ -57,13 +57,13 @@ spec:
         
         - model_name: qwen2.5:7b
           litellm_params:
-            model: ollama/qwen2.5:7b
-            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
+            model: openai/qwen2.5:7b
+            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434/v1
             num_ctx: 8192
         - model_name: qwen2.5:7b-instruct
           litellm_params:
-            model: ollama/qwen2.5:7b-instruct
-            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
+            model: openai/qwen2.5:7b-instruct
+            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434/v1
             num_ctx: 8192
 
       mcp_servers:
