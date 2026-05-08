@@ -21,7 +21,6 @@ spec:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
-
         - key: "nvidia.com/gpu"
           operator: "Exists"
           effect: "NoSchedule"
@@ -35,15 +34,13 @@ spec:
         - name: vllm
           image: vllm/vllm-openai:latest
           imagePullPolicy: Always
-
           command:
             - python3
             - -m
             - vllm.entrypoints.openai.api_server
-
           args:
             - --model
-            - Qwen/Qwen2.5-7B-Instruct
+            - Qwen/Qwen2.5-7B-Instruct-AWQ
 
             - --served-model-name
             - qwen-tool
@@ -57,11 +54,19 @@ spec:
             - --dtype
             - half
 
+            - --quantization
+            - awq
+
             - --gpu-memory-utilization
-            - "0.90"
+            - "0.82"
 
             - --max-model-len
             - "4096"
+
+            - --max-num-seqs
+            - "2"
+
+            - --enforce-eager
 
             - --enable-auto-tool-choice
 
@@ -71,7 +76,6 @@ spec:
           env:
             - name: HF_HOME
               value: /hf-cache
-
             - name: TRANSFORMERS_CACHE
               value: /hf-cache
 
@@ -89,7 +93,6 @@ spec:
               memory: "10Gi"
               ephemeral-storage: "20Gi"
               nvidia.com/gpu: "1"
-
             limits:
               cpu: "4"
               memory: "20Gi"
@@ -110,7 +113,6 @@ spec:
               port: http
             initialDelaySeconds: 300
             periodSeconds: 30
-
 ---
 apiVersion: v1
 kind: Service
@@ -120,10 +122,8 @@ metadata:
 spec:
   selector:
     app: qwen-vllm
-
   ports:
     - name: http
       port: 8000
       targetPort: http
-
   type: ClusterIP

@@ -16,7 +16,7 @@ spec:
 
   values:
     grafana:
-      url: http://kps-grafana.monitoring.svc.cluster.local
+      url: http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local
       apiKey:
         existingSecret: grafana-mcp-secret
         existingSecretKey: api-key
