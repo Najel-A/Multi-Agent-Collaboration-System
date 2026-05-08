@@ -48,6 +48,11 @@ spec:
         litellm_params:
           model: ollama/llama3.2:3b
           api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
+      - model_name: rca-deepseek
+        litellm_params:
+          model: openai/rca-deepseek
+          api_base: http://rca-deepseek.nexus-trace.svc.cluster.local:8000/v1
+          api_key: dummy
 
     general_settings:
       master_key: os.environ/PROXY_MASTER_KEY
