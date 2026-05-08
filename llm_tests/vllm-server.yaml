@@ -17,7 +17,7 @@ spec:
         gpu-node-large: "true"
 
       tolerations:
-        - key: "gpu-node-large"
+        - key: "gpu-node"
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
