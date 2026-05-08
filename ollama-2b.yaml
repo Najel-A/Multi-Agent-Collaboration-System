@@ -69,6 +69,8 @@ spec:
               value: "24h"
             - name: OLLAMA_NUM_CTX
               value: "8192"
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: "8192"
           volumeMounts:
             - name: ollama-data
               mountPath: /root/.ollama
