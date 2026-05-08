@@ -64,7 +64,7 @@ spec:
           url: http://k8s-mcp-readonly.nexus-trace.svc.cluster.local:8080/mcp
           transport: http
         grafana_mcp_admin:
-          url: http://grafana-mcp.nexus-trace.svc.cluster.local:8080/sse
+          url: http://grafana-mcp.nexus-trace.svc.cluster.local:8000/sse
           transport: sse
 
     general_settings:
