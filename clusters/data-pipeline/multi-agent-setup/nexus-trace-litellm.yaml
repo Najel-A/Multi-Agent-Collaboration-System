@@ -1,5 +1,3 @@
-
----
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -44,15 +42,21 @@ spec:
 
     proxy_config:
       model_list:
-      - model_name: llama3.2:3b
-        litellm_params:
-          model: ollama/llama3.2:3b
-          api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
-      - model_name: rca-deepseek
-        litellm_params:
-          model: openai/rca-deepseek
-          api_base: http://rca-deepseek.nexus-trace.svc.cluster.local:8000/v1
-          api_key: dummy
+        - model_name: llama3.2:3b
+          litellm_params:
+            model: ollama/llama3.2:3b
+            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
+
+        - model_name: rca-deepseek
+          litellm_params:
+            model: openai/rca-deepseek
+            api_base: http://rca-deepseek.nexus-trace.svc.cluster.local:8000/v1
+            api_key: dummy
+
+      mcp_servers:
+        k8s_mcp_readonly:
+          url: http://k8s-mcp-readonly.nexus-trace.svc.cluster.local:8080/mcp
+          transport: http
 
     general_settings:
       master_key: os.environ/PROXY_MASTER_KEY
