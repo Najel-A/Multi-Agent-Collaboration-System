@@ -60,6 +60,11 @@ spec:
             model: ollama/qwen2.5:7b
             api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
             num_ctx: 8192
+        - model_name: qwen2.5:7b-instruct
+          litellm_params:
+            model: ollama/qwen2.5:7b-instruct
+            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
+            num_ctx: 8192
 
       mcp_servers:
         k8s_mcp_readonly:

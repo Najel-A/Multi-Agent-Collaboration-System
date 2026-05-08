@@ -38,7 +38,7 @@ spec:
             - |
               ollama serve &
               sleep 10
-              ollama pull qwen2.5:7b
+              ollama pull qwen2.5:7b-instruct
           env:
             - name: OLLAMA_HOST
               value: "0.0.0.0:11434"
