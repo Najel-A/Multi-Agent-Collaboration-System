@@ -25,5 +25,4 @@ spec:
 
     service:
       type: ClusterIP
-      port: 8080
-      targetPort: 8000
+      port: 8000
