@@ -38,7 +38,7 @@ spec:
             - |
               ollama serve &
               sleep 10
-              ollama pull llama3.2:3b
+              ollama pull qwen2.5:7b
           env:
             - name: OLLAMA_HOST
               value: "0.0.0.0:11434"
@@ -67,6 +67,8 @@ spec:
               value: "0.0.0.0:11434"
             - name: OLLAMA_KEEP_ALIVE
               value: "24h"
+            - name: OLLAMA_NUM_CTX
+              value: "8192"
           volumeMounts:
             - name: ollama-data
               mountPath: /root/.ollama

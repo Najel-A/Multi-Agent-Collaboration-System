@@ -52,6 +52,12 @@ spec:
             model: openai/rca-deepseek
             api_base: http://rca-deepseek.nexus-trace.svc.cluster.local:8000/v1
             api_key: dummy
+        
+        - model_name: qwen2.5:7b
+          litellm_params:
+            model: ollama/qwen2.5:7b
+            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
+            num_ctx: 8192
 
       mcp_servers:
         k8s_mcp_readonly:
