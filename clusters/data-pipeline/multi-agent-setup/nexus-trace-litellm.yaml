@@ -41,6 +41,8 @@ spec:
         postgres-password: "change-this-postgres-password"
 
     proxy_config:
+      litellm_settings:
+        drop_params: true
       model_list:
         - model_name: llama3.2:3b
           litellm_params:
