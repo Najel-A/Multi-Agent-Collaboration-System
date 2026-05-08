@@ -102,7 +102,7 @@ spec:
             alertmanagerConfig: "true"
         alertmanagerConfigNamespaceSelector:
           matchNames:
-          - monitoring
+            - monitoring
 
     grafana:
       enabled: true
@@ -116,6 +116,31 @@ spec:
           enabled: true
         datasources:
           enabled: true
+
+      envValueFrom:
+        ELASTICSEARCH_PASSWORD:
+          secretKeyRef:
+            name: mas-elasticsearch-es-elastic-user
+            key: elastic
+
+      additionalDataSources:
+        - name: Elasticsearch
+          uid: elasticsearch
+          type: elasticsearch
+          access: proxy
+          url: https://mas-elasticsearch-es-http.elasticsearch.svc.cluster.local:9200
+          isDefault: false
+          basicAuth: true
+          basicAuthUser: elastic
+          secureJsonData:
+            basicAuthPassword: ${ELASTICSEARCH_PASSWORD}
+          jsonData:
+            index: filebeat-*
+            timeField: "@timestamp"
+            esVersion: "8.0.0"
+            tlsSkipVerify: true
+            logMessageField: message
+            logLevelField: log.level
 
     kubeStateMetrics:
       enabled: true
