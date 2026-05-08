@@ -48,6 +48,7 @@ spec:
           litellm_params:
             model: openai/llama3.2:3b
             api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
+            api_key: "dummy"
 
         - model_name: rca-deepseek
           litellm_params:
@@ -60,11 +61,13 @@ spec:
             model: openai/qwen2.5:7b
             api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434/v1
             num_ctx: 8192
+            api_key: "dummy"
         - model_name: qwen2.5:7b-instruct
           litellm_params:
             model: openai/qwen2.5:7b-instruct
             api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434/v1
             num_ctx: 8192
+            api_key: "dummy"
 
       mcp_servers:
         k8s_mcp_readonly:
