@@ -72,3 +72,12 @@ spec:
   type: oci
   interval: 5m
   url: oci://docker.litellm.ai/berriai
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana-community
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://grafana-community.github.io/helm-charts
