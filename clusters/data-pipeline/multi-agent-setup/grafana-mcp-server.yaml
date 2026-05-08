@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana-mcp-readonly
+  namespace: nexus-trace
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-mcp-readonly
+  namespace: nexus-trace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana-mcp-readonly
+  template:
+    metadata:
+      labels:
+        app: grafana-mcp-readonly
+    spec:
+      serviceAccountName: grafana-mcp-readonly
+      containers:
+        - name: grafana-mcp
+          image: mcp/grafana:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: GRAFANA_URL
+              value: http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local
+
+            # create a Grafana service account token and store in secret
+            - name: GRAFANA_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-mcp-secret
+                  key: api-key
+
+            # optional
+            - name: GRAFANA_ORG_ID
+              value: "1"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-mcp-readonly
+  namespace: nexus-trace
+spec:
+  selector:
+    app: grafana-mcp-readonly
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  type: ClusterIP
