@@ -7,7 +7,9 @@ from typing import Any, Dict
 
 import httpx
 from langgraph.graph import StateGraph
+from dotenv import load_dotenv
 
+load_dotenv()
 
 LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
 LITELLM_API_KEY = os.getenv("LITELLM_API_KEY", "sk-change-this-master-key")
