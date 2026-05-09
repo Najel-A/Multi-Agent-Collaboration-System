@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: analyzer
-          image: chelseajaculina/lsa-analyzer:1.0.2
+          image: chelseajaculina/lsa-analyzer:1.0.3
           imagePullPolicy: Always
           ports:
             - name: http
