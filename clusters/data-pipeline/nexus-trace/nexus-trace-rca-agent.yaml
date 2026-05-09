@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: rca-agent
-          image: yourdockerhub/rca-agent:1.0.0
+          image: akasht29/rca-agent:1.0.0
           imagePullPolicy: Always
           ports:
             - name: http
