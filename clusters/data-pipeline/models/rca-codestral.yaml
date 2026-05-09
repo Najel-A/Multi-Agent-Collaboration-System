@@ -78,9 +78,10 @@ spec:
             - --enforce-eager
 
             - --enable-auto-tool-choice
+            
 
             - --tool-call-parser
-            - hermes
+            - mistral
 
           env:
             - name: HF_HOME
