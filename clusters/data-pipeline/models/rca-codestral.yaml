@@ -70,7 +70,7 @@ spec:
             - "0.95"
 
             - --max-model-len
-            - "4096"
+            - "24576"
 
             - --max-num-seqs
             - "1"
