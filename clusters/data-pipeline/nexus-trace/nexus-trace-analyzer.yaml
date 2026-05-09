@@ -29,22 +29,22 @@ spec:
             value: "300"
 
           - name: RCA_QWEN_URL
-            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000/v1"
+            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000"
           - name: RCA_QWEN_MODEL
             value: "rca-qwen"
 
           - name: RCA_DEEPSEEK_URL
-            value: "http://rca-deepseek.nexus-trace.svc.cluster.local:8000/v1"
+            value: "http://rca-deepseek.nexus-trace.svc.cluster.local:8000"
           - name: RCA_DEEPSEEK_MODEL
             value: "rca-deepseek"
 
           - name: EXECUTOR_URL
-            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000/v1"
+            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000"
           - name: EXECUTOR_MODEL
             value: "rca-qwen"
 
           - name: VALIDATOR_URL
-            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000/v1"
+            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000"
           - name: VALIDATOR_MODEL
             value: "rca-qwen"
           readinessProbe:
