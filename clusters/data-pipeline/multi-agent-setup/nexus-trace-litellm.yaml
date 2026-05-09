@@ -44,10 +44,10 @@ spec:
       litellm_settings:
         drop_params: true
       model_list:
-        - model_name: codestral
+        - model_name: rca-codestral
           litellm_params:
-            model: openai/codestral
-            api_base: http://codestral.nexus-trace.svc.cluster.local:8000/v1
+            model: openai/rca-codestral
+            api_base: http://rca-codestral.nexus-trace.svc.cluster.local:8000/v1
             api_key: dummy
 
         - model_name: rca-deepseek
