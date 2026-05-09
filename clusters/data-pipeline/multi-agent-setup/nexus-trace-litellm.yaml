@@ -75,6 +75,9 @@ spec:
         grafana_mcp_admin:
           url: http://grafana-mcp.nexus-trace.svc.cluster.local:8000/sse
           transport: sse
+        k8s_mcp_fix_agent:
+          url: http://k8s-mcp-fix-agent.nexus-trace.svc.cluster.local:8080/mcp
+          transport: http
 
     general_settings:
       master_key: os.environ/PROXY_MASTER_KEY
