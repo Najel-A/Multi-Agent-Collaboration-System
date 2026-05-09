@@ -55,7 +55,7 @@ spec:
             - half
 
             - --gpu-memory-utilization
-            - "0.85"
+            - "0.95"
 
             - --max-model-len
             - "32768"
