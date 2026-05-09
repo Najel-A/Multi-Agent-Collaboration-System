@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: crca-codestral
+  name: rca-codestral
   namespace: nexus-trace
 spec:
   replicas: 1
@@ -28,7 +28,7 @@ spec:
       volumes:
         - name: hf-cache
           emptyDir:
-            sizeLimit: 120Gi
+            sizeLimit: 100Gi
         - name: dshm
           emptyDir:
             medium: Memory
@@ -61,7 +61,10 @@ spec:
             - half
 
             - --quantization
-            - awq
+            - bitsandbytes
+
+            - --load-format
+            - bitsandbytes
 
             - --gpu-memory-utilization
             - "0.95"
@@ -94,14 +97,14 @@ spec:
 
           resources:
             requests:
-              cpu: "4"
-              memory: "24Gi"
+              cpu: "2"
+              memory: "10Gi"
               ephemeral-storage: "80Gi"
               nvidia.com/gpu: "1"
             limits:
-              cpu: "6"
-              memory: "32Gi"
-              ephemeral-storage: "120Gi"
+              cpu: "3"
+              memory: "14Gi"
+              ephemeral-storage: "100Gi"
               nvidia.com/gpu: "1"
 
           startupProbe:
@@ -130,11 +133,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: codestral-22b
+  name: rca-codestral
   namespace: nexus-trace
 spec:
   selector:
-    app: codestral-22b
+    app: rca-codestral
   ports:
     - name: http
       port: 8000
