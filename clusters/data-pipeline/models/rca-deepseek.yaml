@@ -43,12 +43,12 @@ spec:
           resources:
             requests:
               cpu: "1"
-              memory: "6Gi"
+              memory: "10Gi"
               ephemeral-storage: "40Gi"
               nvidia.com/gpu: "1"
             limits:
               cpu: "2"
-              memory: "10Gi"
+              memory: "14Gi"
               ephemeral-storage: "60Gi"
               nvidia.com/gpu: "1"
           readinessProbe:
