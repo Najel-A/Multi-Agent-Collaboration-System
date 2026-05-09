@@ -13,21 +13,24 @@ from langgraph.graph import StateGraph
 load_dotenv()
 
 
-LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://localhost:4000").rstrip("/")
 LITELLM_API_KEY = os.getenv("LITELLM_API_KEY", "sk-change-this-master-key")
 
 MODEL_NAME = os.getenv("MODEL_NAME", "qwen-tool")
 READONLY_MCP_SERVER = os.getenv("READONLY_MCP_SERVER", "k8s_mcp_readonly")
 DEFAULT_NAMESPACE = os.getenv("DEFAULT_NAMESPACE", "test-app")
 
+MCP_TIMEOUT_SECONDS = float(os.getenv("MCP_TIMEOUT_SECONDS", "120"))
+LLM_READ_TIMEOUT_SECONDS = float(os.getenv("LLM_READ_TIMEOUT_SECONDS", "600"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "300"))
+LOG_TAIL_LINES = int(os.getenv("LOG_TAIL_LINES", "30"))
+
 
 @dataclass
 class State:
-    # Input
     alert: dict = field(default_factory=dict)
     raw_alert_text: str = ""
 
-    # Parsed alert fields
     alertname: str = ""
     namespace: str = ""
     deployment: str = ""
@@ -42,7 +45,6 @@ class State:
     generator_url: str = ""
     runbook_url: str = ""
 
-    # Runtime state
     evidence: dict = field(default_factory=dict)
     pod_verified: bool = False
     matched_pod: str = ""
@@ -118,16 +120,24 @@ async def call_mcp_tool(tool_name: str, arguments: dict) -> dict:
         "x-litellm-api-key": f"Bearer {LITELLM_API_KEY}",
     }
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(url, headers=headers, json=payload)
+    try:
+        async with httpx.AsyncClient(timeout=MCP_TIMEOUT_SECONDS) as client:
+            response = await client.post(url, headers=headers, json=payload)
 
-    response.raise_for_status()
+        response.raise_for_status()
 
-    for line in response.text.splitlines():
-        if line.startswith("data: "):
-            return json.loads(line.replace("data: ", "", 1))
+        for line in response.text.splitlines():
+            if line.startswith("data: "):
+                return json.loads(line.replace("data: ", "", 1))
 
-    return {"raw": response.text}
+        return {"raw": response.text}
+
+    except Exception as e:
+        return {
+            "error": str(e),
+            "tool_name": tool_name,
+            "arguments": arguments,
+        }
 
 
 def mcp_is_error(result: dict) -> bool:
@@ -155,13 +165,14 @@ async def collect_evidence(state: State) -> Dict[str, Any]:
                 "name": state.pod,
             },
         )
+
         evidence["target_pod"] = pod_result
 
         if not mcp_is_error(pod_result):
             log_args = {
                 "namespace": state.namespace,
                 "name": state.pod,
-                "tail": 100,
+                "tail": LOG_TAIL_LINES,
             }
 
             if state.container:
@@ -195,11 +206,29 @@ def validate_alert_pod(state: State) -> Dict[str, Any]:
     }
 
 
+def compact_evidence(evidence: dict) -> str:
+    text = json.dumps(evidence, indent=2)
+
+    max_chars = 12000
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n\n...TRUNCATED..."
+    return text
+
+
 async def diagnose_with_llm(state: State) -> Dict[str, Any]:
     url = f"{LITELLM_BASE_URL}/v1/chat/completions"
 
     prompt = f"""
 You are a Kubernetes RCA agent.
+
+Important output rules:
+- Return concise RCA only.
+- Do not output chain-of-thought.
+- Do not write "Thinking Process".
+- Do not invent cluster state.
+- Trust live MCP/Kubernetes evidence over alert labels.
+- If pod_verified is false, do not claim the alert pod is currently present.
+- Prefer human approval before write/fix actions.
 
 Parsed alert:
 - Alert name: {state.alertname}
@@ -219,25 +248,18 @@ Validation:
 - Pod verified in live Kubernetes evidence: {state.pod_verified}
 - Matched pod: {state.matched_pod}
 
-Rules:
-- Do not invent cluster state.
-- Trust live MCP/Kubernetes evidence over alert labels.
-- If pod_verified is false, do not claim the alert pod is currently present.
-- Use logs/events/pod status as primary evidence.
-- Do not recommend destructive actions unless clearly justified.
-- Prefer human approval before write/fix actions.
-
 Live Kubernetes evidence:
-{json.dumps(state.evidence, indent=2)}
+{compact_evidence(state.evidence)}
 
-Return:
-1. alert validity
-2. affected workload/pod/container
-3. probable root cause
-4. exact evidence used
-5. recommended next evidence if needed
-6. recommended fix plan
-7. whether auto-fix is safe or human approval is required
+Return exactly this format:
+
+Alert validity:
+Affected object:
+Probable root cause:
+Evidence used:
+Recommended next evidence:
+Fix plan:
+Auto-fix safety:
 """
 
     payload = {
@@ -247,7 +269,8 @@ Return:
                 "role": "system",
                 "content": (
                     "You are a Kubernetes RCA and remediation agent. "
-                    "Only reason from provided alert data and live Kubernetes MCP evidence."
+                    "Use only the provided alert data and Kubernetes MCP evidence. "
+                    "Be concise. Do not reveal chain-of-thought."
                 ),
             },
             {
@@ -256,6 +279,7 @@ Return:
             },
         ],
         "temperature": 0.1,
+        "max_tokens": LLM_MAX_TOKENS,
     }
 
     headers = {
@@ -263,15 +287,37 @@ Return:
         "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=120) as client:
-        response = await client.post(url, headers=headers, json=payload)
+    timeout = httpx.Timeout(
+        connect=10.0,
+        read=LLM_READ_TIMEOUT_SECONDS,
+        write=30.0,
+        pool=30.0,
+    )
 
-    response.raise_for_status()
-    data = response.json()
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(url, headers=headers, json=payload)
 
-    return {
-        "diagnosis": data["choices"][0]["message"]["content"],
-    }
+        response.raise_for_status()
+        data = response.json()
+
+        return {
+            "diagnosis": data["choices"][0]["message"]["content"],
+        }
+
+    except httpx.ReadTimeout:
+        return {
+            "diagnosis": (
+                "LLM request timed out before completion. "
+                "Evidence collection completed, but diagnosis could not be generated. "
+                "Reduce prompt size, reduce max_tokens, or increase LLM timeout."
+            )
+        }
+
+    except Exception as e:
+        return {
+            "diagnosis": f"LLM diagnosis failed: {str(e)}"
+        }
 
 
 graph = (
