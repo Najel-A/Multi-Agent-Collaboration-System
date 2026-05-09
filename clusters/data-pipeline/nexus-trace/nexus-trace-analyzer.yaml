@@ -25,25 +25,28 @@ spec:
             - name: http
               containerPort: 8000
           env:
-            - name: MODEL_TIMEOUT_S
-              value: "180"
-            # Sanity-check mode: route ALL 4 agents through a single small Ollama model.
-            - name: RCA_QWEN_URL
-              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
-            - name: RCA_QWEN_MODEL
-              value: "qwen2.5:7b"
-            - name: RCA_DEEPSEEK_URL
-              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
-            - name: RCA_DEEPSEEK_MODEL
-              value: "qwen2.5:7b"
-            - name: EXECUTOR_URL
-              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
-            - name: EXECUTOR_MODEL
-              value: "qwen2.5:7b"
-            - name: VALIDATOR_URL
-              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
-            - name: VALIDATOR_MODEL
-              value: "qwen2.5:7b"
+          - name: MODEL_TIMEOUT_S
+            value: "300"
+
+          - name: RCA_QWEN_URL
+            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000/v1"
+          - name: RCA_QWEN_MODEL
+            value: "rca-qwen"
+
+          - name: RCA_DEEPSEEK_URL
+            value: "http://rca-deepseek.nexus-trace.svc.cluster.local:8000/v1"
+          - name: RCA_DEEPSEEK_MODEL
+            value: "rca-deepseek"
+
+          - name: EXECUTOR_URL
+            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000/v1"
+          - name: EXECUTOR_MODEL
+            value: "rca-qwen"
+
+          - name: VALIDATOR_URL
+            value: "http://rca-qwen.nexus-trace.svc.cluster.local:8000/v1"
+          - name: VALIDATOR_MODEL
+            value: "rca-qwen"
           readinessProbe:
             httpGet:
               path: /health
