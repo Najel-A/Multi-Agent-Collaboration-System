@@ -81,3 +81,12 @@ metadata:
 spec:
   interval: 1h
   url: https://grafana-community.github.io/helm-charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: langchain
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://langchain-ai.github.io/helm/
