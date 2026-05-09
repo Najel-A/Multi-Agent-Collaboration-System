@@ -4,10 +4,37 @@ metadata:
   name: k8s-mcp-fix-agent
   namespace: nexus-trace
 ---
+# Full cluster-wide READ access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-mcp-fix-agent-cluster-read
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-mcp-fix-agent-cluster-read
+subjects:
+  - kind: ServiceAccount
+    name: k8s-mcp-fix-agent
+    namespace: nexus-trace
+roleRef:
+  kind: ClusterRole
+  name: k8s-mcp-fix-agent-cluster-read
+  apiGroup: rbac.authorization.k8s.io
+---
+# Full admin/write access only in test-app namespace
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: k8s-mcp-fix-agent-full
+  name: k8s-mcp-fix-agent-test-app-admin
   namespace: test-app
 rules:
   - apiGroups: ["*"]
@@ -17,7 +44,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: k8s-mcp-fix-agent-full
+  name: k8s-mcp-fix-agent-test-app-admin
   namespace: test-app
 subjects:
   - kind: ServiceAccount
@@ -25,5 +52,5 @@ subjects:
     namespace: nexus-trace
 roleRef:
   kind: Role
-  name: k8s-mcp-fix-agent-full
+  name: k8s-mcp-fix-agent-test-app-admin
   apiGroup: rbac.authorization.k8s.io
