@@ -55,6 +55,8 @@ spec:
           - name: RCA_LANGGRAPH_URL
             value: "http://rca-agent.nexus-trace.svc.cluster.local:8080"
 
+          - name: RCA_LANGGRAPH_URL_2
+            value: "http://rca-agent-2.nexus-trace.svc.cluster.local:8080"
           readinessProbe:
             httpGet:
               path: /health
