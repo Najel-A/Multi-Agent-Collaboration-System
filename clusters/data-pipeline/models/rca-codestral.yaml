@@ -46,7 +46,7 @@ spec:
 
           args:
             - --model
-            - mistralai/Codestral-22B-v0.1
+            - mistralai/Mistral-Small-3.2-24B-Instruct-2506
 
             - --served-model-name
             - rca-codestral

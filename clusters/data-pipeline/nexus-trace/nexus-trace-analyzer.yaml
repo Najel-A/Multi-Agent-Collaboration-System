@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: analyzer
-          image: chelseajaculina/lsa-analyzer:1.0.3
+          image: chelseajaculina/lsa-analyzer:1.0.4
           imagePullPolicy: Always
           ports:
             - name: http
@@ -57,6 +57,10 @@ spec:
 
           - name: RCA_LANGGRAPH_URL_2
             value: "http://rca-agent-2.nexus-trace.svc.cluster.local:8080"
+          
+          - name: EXECUTOR_LANGGRAPH_URL
+            value: "http://executor-agent.nexus-trace.svc.cluster.local:8080"
+
           readinessProbe:
             httpGet:
               path: /health
