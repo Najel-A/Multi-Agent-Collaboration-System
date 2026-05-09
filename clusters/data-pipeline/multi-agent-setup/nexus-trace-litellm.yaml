@@ -44,11 +44,11 @@ spec:
       litellm_settings:
         drop_params: true
       model_list:
-        - model_name: llama3.2:3b
+        - model_name: codestral
           litellm_params:
-            model: openai/llama3.2:3b
-            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
-            api_key: "dummy"
+            model: openai/codestral
+            api_base: http://codestral.nexus-trace.svc.cluster.local:8000/v1
+            api_key: dummy
 
         - model_name: rca-deepseek
           litellm_params:
@@ -56,12 +56,12 @@ spec:
             api_base: http://rca-deepseek.nexus-trace.svc.cluster.local:8000/v1
             api_key: dummy
         
-        - model_name: qwen2.5:7b
+        - model_name: rca-qwen
           litellm_params:
-            model: openai/qwen2.5:7b
-            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434/v1
-            num_ctx: 8192
-            api_key: "dummy"
+            model: openai/rca-qwen
+            api_base: http://rca-qwen.nexus-trace.svc.cluster.local:8000/v1
+            api_key: dummy
+
         - model_name: qwen-tool
           litellm_params:
             model: openai/qwen-tool
