@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: rca-agent-2
-          image: akasht29/rca-agent:1.0.0
+          image: akasht29/rca-agent-2:1.0.1 
           imagePullPolicy: Always
           ports:
             - name: http
