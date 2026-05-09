@@ -78,7 +78,7 @@ spec:
             - --enable-auto-tool-choice
 
             - --tool-call-parser
-            - hermes
+            - deepseek_v3
 
             - --enforce-eager
 
