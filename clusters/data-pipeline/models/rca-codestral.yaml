@@ -77,6 +77,11 @@ spec:
 
             - --enforce-eager
 
+            - --enable-auto-tool-choice
+
+            - --tool-call-parser
+            - hermes
+
           env:
             - name: HF_HOME
               value: /hf-cache
