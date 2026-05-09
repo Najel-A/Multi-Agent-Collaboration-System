@@ -1,8 +1,8 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: langgraph-secrets
-  namespace: langgraph
-type: Opaque
-stringData:
-  litellm-api-key: "sk-change-this-master-key"
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: langgraph-secrets
+#   namespace: langgraph
+# type: Opaque
+# stringData:
+#   litellm-api-key: "sk-change-this-master-key"
