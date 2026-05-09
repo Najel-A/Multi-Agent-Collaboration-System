@@ -23,7 +23,7 @@ spec:
               containerPort: 8080
           env:
             - name: KUBERNETES_NAMESPACE
-              value: test-app
+              value: nexus-trace
 ---
 apiVersion: v1
 kind: Service

@@ -1,8 +1,14 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-mcp-fix-agent
+  namespace: nexus-trace
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: k8s-mcp-fix-agent
-  namespace: test-app
+  namespace: nexus-trace
 rules:
   - apiGroups: [""]
     resources:
@@ -56,7 +62,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: k8s-mcp-fix-agent
-  namespace: test-app
+  namespace: nexus-trace
 subjects:
   - kind: ServiceAccount
     name: k8s-mcp-fix-agent
