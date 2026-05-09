@@ -1,0 +1,61 @@
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: mas-elasticsearch
+  namespace: elasticsearch
+spec:
+  version: 9.1.2
+  nodeSets:
+    - name: master
+      count: 1
+      config:
+        node.roles: ["master"]
+        node.store.allow_mmap: false
+      podTemplate:
+        spec:
+          containers:
+            - name: elasticsearch
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "3Gi"
+                limits:
+                  cpu: "1"
+                  memory: "3Gi"
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 10Gi
+            storageClassName: gp3
+
+    - name: hot
+      count: 2
+      config:
+        node.roles: ["data_hot", "data_content", "ingest"]
+        node.store.allow_mmap: false
+      podTemplate:
+        spec:
+          containers:
+            - name: elasticsearch
+              resources:
+                requests:
+                  cpu: "500m"
+                  memory: "2Gi"
+                limits:
+                  cpu: "2"
+                  memory: "2Gi"
+      volumeClaimTemplates:
+        - metadata:
+            name: elasticsearch-data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 20Gi
+            storageClassName: gp3

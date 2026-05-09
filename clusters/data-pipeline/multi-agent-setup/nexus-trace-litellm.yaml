@@ -1,0 +1,91 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: litellm
+  namespace: nexus-trace
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: litellm-helm
+      version: "1.81.14-stable"
+      sourceRef:
+        kind: HelmRepository
+        name: litellm
+        namespace: flux-system
+
+  values:
+    replicaCount: 1
+
+    image:
+      repository: ghcr.io/berriai/litellm-database
+      tag: "main-v1.81.14-stable"
+      pullPolicy: IfNotPresent
+
+    service:
+      type: ClusterIP
+      port: 4000
+
+    masterkey: "sk-change-this-master-key"
+
+    db:
+      useExisting: false
+      deployStandalone: true
+
+    postgresql:
+      architecture: standalone
+      auth:
+        username: litellm
+        database: litellm
+        password: "change-this-db-password"
+        postgres-password: "change-this-postgres-password"
+
+    proxy_config:
+      litellm_settings:
+        drop_params: true
+      model_list:
+        - model_name: llama3.2:3b
+          litellm_params:
+            model: openai/llama3.2:3b
+            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434
+            api_key: "dummy"
+
+        - model_name: rca-deepseek
+          litellm_params:
+            model: openai/rca-deepseek
+            api_base: http://rca-deepseek.nexus-trace.svc.cluster.local:8000/v1
+            api_key: dummy
+        
+        - model_name: qwen2.5:7b
+          litellm_params:
+            model: openai/qwen2.5:7b
+            api_base: http://ollama-2b.nexus-trace.svc.cluster.local:11434/v1
+            num_ctx: 8192
+            api_key: "dummy"
+        - model_name: qwen-tool
+          litellm_params:
+            model: openai/qwen-tool
+            api_base: http://qwen-vllm.nexus-trace.svc.cluster.local:8000/v1
+            api_key: dummy
+
+      mcp_servers:
+        k8s_mcp_readonly:
+          url: http://k8s-mcp-readonly.nexus-trace.svc.cluster.local:8080/mcp
+          transport: http
+        grafana_mcp_admin:
+          url: http://grafana-mcp.nexus-trace.svc.cluster.local:8000/sse
+          transport: sse
+        k8s_mcp_fix_agent:
+          url: http://k8s-mcp-fix-agent.nexus-trace.svc.cluster.local:8080/mcp
+          transport: http
+
+    general_settings:
+      master_key: os.environ/PROXY_MASTER_KEY
+
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi

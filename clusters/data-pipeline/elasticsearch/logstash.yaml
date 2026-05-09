@@ -1,0 +1,70 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: logstash
+  namespace: elasticsearch
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: logstash
+      version: "8.5.1"
+      sourceRef:
+        kind: HelmRepository
+        name: elastic
+        namespace: flux-system
+
+  values:
+    replicas: 1
+
+    image: docker.elastic.co/logstash/logstash
+    imageTag: "9.1.2"
+
+    logstashPipeline:
+      logstash.conf: |
+        input {
+          beats {
+            port => 5044
+          }
+        }
+
+        output {
+          elasticsearch {
+            hosts => ["https://mas-elasticsearch-es-internal-http.elasticsearch.svc:9200"]
+            user => "elastic"
+            password => "${ELASTIC_PASSWORD}"
+            ssl_enabled => true
+            ssl_certificate_authorities => ["/usr/share/logstash/config/certs/ca.crt"]
+            index => "filebeat-%{+YYYY.MM.dd}"
+          }
+        }
+
+    extraEnvs:
+      - name: ELASTIC_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: mas-elasticsearch-es-elastic-user
+            key: elastic
+
+    secretMounts:
+      - name: es-ca
+        secretName: mas-elasticsearch-es-http-certs-public
+        path: /usr/share/logstash/config/certs
+
+    service:
+      type: ClusterIP
+      ports:
+        - name: beats
+          port: 5044
+          protocol: TCP
+          targetPort: 5044
+
+    logstashJavaOpts: "-Xmx512m -Xms512m"
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 768Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi

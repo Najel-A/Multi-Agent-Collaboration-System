@@ -24,3 +24,69 @@ metadata:
 spec:
   interval: 30m
   url: https://kubernetes.github.io/autoscaler
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: strimzi
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://strimzi.io/charts/
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: elastic
+  namespace: flux-system
+spec:
+  interval: 30m
+  url: https://helm.elastic.co
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: prometheus-community
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://prometheus-community.github.io/helm-charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: bitnami-mongodb
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://registry-1.docker.io/bitnamicharts/mongodb
+  ref:
+    tag: 18.6.31
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: litellm
+  namespace: flux-system
+spec:
+  type: oci
+  interval: 5m
+  url: oci://docker.litellm.ai/berriai
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: grafana-community
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://grafana-community.github.io/helm-charts
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: langchain
+  namespace: flux-system
+spec:
+  interval: 10m
+  url: https://langchain-ai.github.io/helm/

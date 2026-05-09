@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-trace-consumer
+  namespace: nexus-trace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexus-trace-consumer
+  template:
+    metadata:
+      labels:
+        app: nexus-trace-consumer
+    spec:
+      containers:
+        - name: nexus-trace-consumer
+          image: akasht29/kafka-mongo-consumer:1.0.1
+          imagePullPolicy: Always
+          env:
+            - name: KAFKA_BROKERS
+              value: "mas-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+            - name: KAFKA_TOPIC
+              value: "alert-topic"
+            - name: KAFKA_GROUP_ID
+              value: "mongo-writer-debug-1"
+            - name: MONGO_URI
+              value: "mongodb://mongo.nexus-trace.svc.cluster.local:27017/nexus-trace"
+            - name: MONGO_DB
+              value: "nexus-trace"
+            - name: MONGO_COLLECTION
+              value: "alerts"

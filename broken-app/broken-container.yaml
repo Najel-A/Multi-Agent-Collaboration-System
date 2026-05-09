@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken-container-2
+  namespace: test-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broken-container-2
+  template:
+    metadata:
+      labels:
+        app: broken-container-2
+    spec:
+      containers:
+        - name: broken-container-2
+          image: busybox:1.35
+          command:
+            - sh
+            - -c
+            - |
+              echo "$(date -Iseconds) ERROR application failed to start"
+              echo "$(date -Iseconds) FATAL missing required env var DATABASE_URL"
+              exit 1
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

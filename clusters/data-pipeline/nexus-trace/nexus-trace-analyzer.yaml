@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-trace-analyzer
+  namespace: nexus-trace
+  labels:
+    app.kubernetes.io/name: nexus-trace-analyzer
+    app.kubernetes.io/component: inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexus-trace-analyzer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexus-trace-analyzer
+        app.kubernetes.io/component: inference
+    spec:
+      containers:
+        - name: analyzer
+          image: chelseajaculina/lsa-analyzer:1.0.1
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: MODEL_TIMEOUT_S
+              value: "180"
+            # Sanity-check mode: route ALL 4 agents through a single small Ollama model.
+            - name: RCA_QWEN_URL
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
+            - name: RCA_QWEN_MODEL
+              value: "qwen2.5:7b"
+            - name: RCA_DEEPSEEK_URL
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
+            - name: RCA_DEEPSEEK_MODEL
+              value: "qwen2.5:7b"
+            - name: EXECUTOR_URL
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
+            - name: EXECUTOR_MODEL
+              value: "qwen2.5:7b"
+            - name: VALIDATOR_URL
+              value: "http://ollama-2b.nexus-trace.svc.cluster.local:11434"
+            - name: VALIDATOR_MODEL
+              value: "qwen2.5:7b"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analyzer
+  namespace: nexus-trace
+  labels:
+    app.kubernetes.io/name: nexus-trace-analyzer
+    app.kubernetes.io/component: inference
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nexus-trace-analyzer
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

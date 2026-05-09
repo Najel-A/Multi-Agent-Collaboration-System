@@ -1,0 +1,28 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: grafana-mcp
+  namespace: nexus-trace
+spec:
+  interval: 5m
+  chart:
+    spec:
+      chart: grafana-mcp
+      sourceRef:
+        kind: HelmRepository
+        name: grafana-community
+        namespace: flux-system
+      interval: 30m
+
+  values:
+    grafana:
+      url: http://kube-prometheus-stack-grafana.monitoring.svc.cluster.local
+      apiKey:
+        existingSecret: grafana-mcp-secret
+        existingSecretKey: api-key
+
+    transport: sse
+
+    service:
+      type: ClusterIP
+      port: 8000

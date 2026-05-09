@@ -1,0 +1,14 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: alert-topic
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: mas-kafka
+spec:
+  partitions: 3
+  replicas: 2
+  topicName: alert-topic
+  config:
+    retention.ms: 604800000
+    segment.bytes: 1073741824

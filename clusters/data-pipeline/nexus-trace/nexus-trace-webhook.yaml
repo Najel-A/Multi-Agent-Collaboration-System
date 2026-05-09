@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-trace-alert-webhook
+  namespace: nexus-trace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nexus-trace-alert-webhook
+  template:
+    metadata:
+      labels:
+        app: nexus-trace-alert-webhook
+    spec:
+      containers:
+        - name: alert-webhook
+          image: akasht29/alert-webhook:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "mas-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092"
+            - name: KAFKA_TOPIC
+              value: "alert-topic"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-trace-alert-webhook
+  namespace: nexus-trace
+spec:
+  selector:
+    app: nexus-trace-alert-webhook
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

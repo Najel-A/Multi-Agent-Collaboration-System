@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-2b
+  namespace: nexus-trace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama-2b
+  template:
+    metadata:
+      labels:
+        app: ollama-2b
+    spec:
+      nodeSelector:
+        gpu-node: "true"
+      tolerations:
+        - key: "gpu-node"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+      volumes:
+        - name: ollama-data
+          emptyDir:
+            sizeLimit: 40Gi
+
+      initContainers:
+        - name: pull-model
+          image: ollama/ollama:latest
+          imagePullPolicy: Always
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              ollama serve &
+              sleep 10
+              ollama pull qwen2.5:7b-instruct
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              cpu: "1"
+              memory: "4Gi"
+              ephemeral-storage: "45Gi"
+            limits:
+              cpu: "2"
+              memory: "8Gi"
+              ephemeral-storage: "60Gi"
+
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 11434
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"
+            - name: OLLAMA_NUM_CTX
+              value: "8192"
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: "8192"
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              cpu: "1"
+              memory: "10Gi"
+              ephemeral-storage: "45Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "2"
+              memory: "13Gi"
+              ephemeral-storage: "60Gi"
+              nvidia.com/gpu: "1"
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: http
+            initialDelaySeconds: 120
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-2b
+  namespace: nexus-trace
+spec:
+  selector:
+    app: ollama-2b
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+  type: ClusterIP

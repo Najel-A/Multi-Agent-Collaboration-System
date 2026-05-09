@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-trace-frontend
+  namespace: nexus-trace
+  labels:
+    app.kubernetes.io/name: nexus-trace-frontend
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nexus-trace-frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexus-trace-frontend
+        app.kubernetes.io/component: web
+    spec:
+      containers:
+        - name: frontend
+          image: frostal027/lsa-frontend:1.0.0
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: nexus-trace
+  labels:
+    app.kubernetes.io/name: nexus-trace-frontend
+    app.kubernetes.io/component: web
+spec:
+  selector:
+    app.kubernetes.io/name: nexus-trace-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
